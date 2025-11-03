@@ -27,6 +27,8 @@ import Auction from "./pages/Auction";
 import PrivacyPolicy from "./pages/PrivacyPolicy";
 import Terms from "./pages/Terms";
 import Rules from "./pages/Rules";
+import AdminAuction from "./pages/admin_auction";
+import { AdminAuctionPlayerDetails } from "./pages/admin_auction_player_details";
 
 
 
@@ -60,10 +62,15 @@ const App = () => (
             <Route path="/privacy" element={<PrivacyPolicy />} />
             <Route path="/terms" element={<Terms />} />
             <Route path="/rules" element={<Rules />} />
+            // Example in your router setup
+            <Route path="/admin/auction2" element={<AdminAuction />} />
 
             <Route path="/admin/*" element={<Admin />} />
             <Route path="/dashboard" element={<PlayerDashboard />} />
             <Route path="/auction" element={<Auction />} />
+            <Route path="/admin/auction/player/:playerId" element={<AdminAuctionPlayerDetails />} />
+           
+            
 
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />

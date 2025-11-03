@@ -6,7 +6,6 @@
     "paths": {
       "@/*": ["./src/*"]
     },
-    "types": ["vite/client", "node", "react", "react-dom"],
     "noImplicitAny": false,
     "noUnusedParameters": false,
     "skipLibCheck": true,

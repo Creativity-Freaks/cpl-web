@@ -1,0 +1,119 @@
+body {
+  background: #f5f8fc;
+}
+
+.admin-flex {
+  display: flex;
+  min-height: 100vh;
+}
+
+.sidebar {
+  width: 230px;
+  background: #153e5a;
+  color: #fff;
+  padding: 2rem 1rem;
+  box-shadow: 2px 0px 10px #0001;
+}
+
+.sidebar h3 {
+  color: #fff;
+  text-align: center;
+}
+
+.nav-section {
+  margin-top: 2.2rem;
+}
+
+.nav-link {
+  display: block;
+  padding: .7rem 1.1rem;
+  margin: .3rem 0;
+  border-radius: 6px;
+  text-decoration: none;
+  color: inherit;
+  font-size: 1.08rem;
+  cursor: pointer;
+}
+
+.nav-link.active,
+.nav-link:hover {
+  background: #216aaa;
+  color: #fff;
+}
+
+.main {
+  flex: 1 1 0;
+  padding: 2.5rem 2.5rem;
+  background: #fafcff;
+}
+
+.user-bar {
+  text-align: right;
+  margin-bottom: 16px;
+}
+
+.logout-btn {
+  background: #e63c3c;
+  color: #fff;
+  border: none;
+  padding: .45em 1.2em;
+  border-radius: 6px;
+  margin-left: 12px;
+  cursor: pointer;
+}
+
+.form-group {
+  margin-bottom: 1rem;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 0.5rem;
+  font-weight: bold;
+}
+
+.form-group input,
+.form-group select {
+  width: 100%;
+  padding: 0.5rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+}
+
+.list-group {
+  max-height: 200px;
+  overflow-y: auto;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+}
+
+.list-group-item {
+  padding: 0.5rem;
+  cursor: pointer;
+  border-bottom: 1px solid #eee;
+}
+
+.list-group-item:last-child {
+  border-bottom: none;
+}
+
+.list-group-item.selected {
+  background-color: #e3f2fd;
+}
+
+.success {
+  color: green;
+}
+
+.error {
+  color: red;
+}
+
+@media (max-width: 800px) {
+  .admin-flex {
+    flex-direction: column;
+  }
+  .sidebar {
+    width: 100%;
+  }
+}
