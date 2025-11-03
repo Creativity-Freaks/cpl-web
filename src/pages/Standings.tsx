@@ -2,7 +2,8 @@ import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { currentStandings } from "@/data/standings";
+import { useEffect, useState } from "react";
+import { fetchStandings } from "@/lib/api";
 
 const chip = (r: "W" | "L") => (
   <span className={`inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-semibold ${r === "W" ? "bg-emerald-500/15 text-emerald-500" : "bg-red-500/15 text-red-500"}`}>
@@ -11,7 +12,11 @@ const chip = (r: "W" | "L") => (
 );
 
 const Standings = () => {
-  const rows = [...currentStandings.table]
+  const [standings, setStandings] = useState<{ seasonTitle: string; table: { team: string; played: number; won: number; lost: number; nrr: number; points: number; last5: ("W"|"L")[] }[] } | null>(null);
+  useEffect(() => {
+    fetchStandings().then((s) => setStandings(s)).catch(() => setStandings({ seasonTitle: "Current Season", table: [] }));
+  }, []);
+  const rows = [...(standings?.table || [])]
     .sort((a, b) => b.points - a.points || b.nrr - a.nrr);
 
   return (
@@ -28,7 +33,7 @@ const Standings = () => {
           <div className="container mx-auto px-4">
             <div className="pt-8 pb-8 md:pb-12 max-w-3xl">
               <h1 className="text-4xl md:text-5xl font-extrabold leading-tight">Points Table</h1>
-              <p className="mt-3 text-lg text-muted-foreground">{currentStandings.seasonTitle} • Live standings with NRR and form</p>
+              <p className="mt-3 text-lg text-muted-foreground">{standings?.seasonTitle || "Current Season"} • Live standings with NRR and form</p>
             </div>
           </div>
         </section>

@@ -6,7 +6,6 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { Link } from "react-router-dom";
-import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 
 const ForgotPassword = () => {
   const onSubmit: React.FormEventHandler<HTMLFormElement> = async (e) => {
@@ -17,17 +16,8 @@ const ForgotPassword = () => {
       toast.error("Please enter your email");
       return;
     }
-    if (!isSupabaseConfigured) {
-      toast.error("Password reset unavailable: Supabase not configured.");
-      return;
-    }
-    const redirectTo = `${window.location.origin}/change-password`;
-    const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo });
-    if (error) {
-      toast.error(error.message || "Failed to send reset link");
-    } else {
-      toast.success("If an account exists, a reset link has been sent to your email.");
-    }
+    // Backend does not expose a password reset endpoint yet.
+    toast.info("Password reset via email isn't available yet. Please contact an admin or try again later.");
   };
 
   return (

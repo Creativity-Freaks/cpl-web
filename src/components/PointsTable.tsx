@@ -1,15 +1,27 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { currentStandings } from "@/data/standings";
+import { useEffect, useState } from "react";
+import { fetchStandings } from "@/lib/api";
 
 export default function PointsTable({ compact = false }: { compact?: boolean }) {
-  const rows = [...currentStandings.table].sort((a, b) => b.points - a.points || b.nrr - a.nrr);
+  const [standings, setStandings] = useState(null);
+  useEffect(() => {
+    fetchStandings().then((data) => {
+      setStandings(data);
+    }).catch(() => void 0);
+  }, []);
+
+  if (!standings) {
+    return <div>Loading...</div>;
+  }
+
+  const rows = [...standings.table].sort((a, b) => b.points - a.points || b.nrr - a.nrr);
 
   return (
     <Card className={compact ? "" : "max-w-4xl mx-auto"}>
       <CardHeader>
         <CardTitle>Points Table</CardTitle>
-        <CardDescription>{currentStandings.seasonTitle} • Sorted by Points, then Net Run Rate</CardDescription>
+        <CardDescription>{standings.seasonTitle} • Sorted by Points, then Net Run Rate</CardDescription>
       </CardHeader>
       <CardContent>
         <Table>

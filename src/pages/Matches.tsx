@@ -3,13 +3,13 @@ import Footer from "@/components/Footer";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
-import { tournaments, Match } from "@/data/tournaments";
+import { Match, UIMatchItem, fetchTournaments } from "@/lib/api";
 import { useMemo, useState } from "react";
 import PointsTable from "@/components/PointsTable";
 import LeaderboardsWidget from "@/components/LeaderboardsWidget";
 import { Link } from "react-router-dom";
 import { useEffect } from "react";
-import { fetchMatches, UIMatchItem } from "@/lib/api";
+// imports above bring in Match type, UIMatchItem and fetchTournaments
 
 const teamColors: Record<string, string> = {
   CSIT: "from-fuchsia-500 to-purple-600",
@@ -179,11 +179,13 @@ const Matches = () => {
   const [query, setQuery] = useState("");
   const [dynamic, setDynamic] = useState<UIMatchItem[] | null>(null);
   useEffect(() => {
-    fetchMatches().then((rows) => {
-      if (rows && rows.length) setDynamic(rows);
+    fetchTournaments().then((fetchedTournaments) => {
+      if (fetchedTournaments && fetchedTournaments.length) {
+        setDynamic(fetchedTournaments.flatMap((t) => t.matches.map((m) => ({ match: m, tournamentTitle: t.title, tournamentId: t.id }))));
+      }
     }).catch(() => void 0);
   }, []);
-  const allRaw = useMemo(() => (dynamic && dynamic.length ? dynamic : tournaments.flatMap((t) => t.matches.map((m) => ({ match: m, tournamentTitle: t.title, tournamentId: t.id })))), [dynamic]);
+  const allRaw = useMemo(() => dynamic || [], [dynamic]);
   const [teamFilter, setTeamFilter] = useState<string>("All");
   const all = useMemo(() => {
     if (!query.trim()) return allRaw;

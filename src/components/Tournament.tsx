@@ -4,36 +4,68 @@ import { Calendar, Clock, MapPin, Users, ArrowRight } from "lucide-react";
 import { Link } from "react-router-dom";
 import trophyImage from "@/assets/trophy.jpg";
 import { useEffect, useState } from "react";
-import { fetchUpcomingTournaments } from "@/lib/api";
+import { fetchTournaments } from "@/lib/api";
 import type { UITournament } from "@/lib/api";
 
 const Tournament = () => {
-  const [upcoming, setUpcoming] = useState<UITournament[]>([]);
+  const [tournaments, setTournaments] = useState<UITournament[]>([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let mounted = true;
     (async () => {
-      const list = await fetchUpcomingTournaments();
-      if (!mounted) return;
-      setUpcoming(list.slice(0, 2));
+      try {
+        const list = await fetchTournaments();
+        if (mounted) {
+          setTournaments(list);
+        }
+      } catch (error) {
+        console.error("Error fetching tournaments:", error);
+      } finally {
+        if (mounted) {
+          setLoading(false);
+        }
+      }
     })();
-    return () => { mounted = false; };
+    return () => {
+      mounted = false;
+    };
   }, []);
+
+  if (loading) {
+    return (
+      <section className="py-20 bg-background">
+        <div className="container mx-auto px-4 text-center">
+          <p className="text-lg text-muted-foreground">Loading tournaments...</p>
+        </div>
+      </section>
+    );
+  }
+
+  if (tournaments.length === 0) {
+    return (
+      <section className="py-20 bg-background">
+        <div className="container mx-auto px-4 text-center">
+          <p className="text-lg text-muted-foreground">No tournaments available at the moment.</p>
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section className="py-20 bg-background">
       <div className="container mx-auto px-4">
         <div className="text-center mb-16 animate-fade-in-up">
           <h2 className="text-4xl md:text-5xl font-bold text-foreground mb-4">
-            Upcoming <span className="text-accent">Tournaments</span>
+            All <span className="text-accent">Tournaments</span>
           </h2>
           <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-            Get ready for the most exciting cricket season. Register your team and compete for glory!
+            Explore all cricket tournaments. Stay updated and join the action!
           </p>
         </div>
 
         <div className="grid lg:grid-cols-2 gap-8 mb-12">
-          {upcoming.map((tournament, index) => (
+          {tournaments.map((tournament, index) => (
             <Card 
               key={tournament.id || index} 
               className="border-border hover:shadow-glow transition-all duration-300 hover:-translate-y-1 animate-scale-in overflow-hidden"
@@ -64,7 +96,7 @@ const Tournament = () => {
                     <span>{tournament.venue || 'PSTU Cricket Ground'}</span>
                   </div>
                 </div>
-                <Link to="/tournament">
+                <Link to={`/tournament/${tournament.id}`}>
                   <Button className="w-full bg-gradient-accent shadow-accent">
                     View Details
                     <ArrowRight className="ml-2 h-4 w-4" />

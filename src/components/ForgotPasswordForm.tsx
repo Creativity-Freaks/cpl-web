@@ -5,7 +5,6 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
-import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 
 type Props = { compact?: boolean; onSuccess?: () => void };
 
@@ -14,17 +13,9 @@ const ForgotPasswordForm: React.FC<Props> = ({ compact = false, onSuccess }) => 
 
   const onSubmit = form.handleSubmit(async (values) => {
     if (!values.email) return toast.error("Please enter your email");
-    if (!isSupabaseConfigured || !supabase) return toast.error("Password reset unavailable: Supabase not configured.");
-    try {
-      const redirectTo = `${window.location.origin}/change-password`;
-      const { error } = await supabase.auth.resetPasswordForEmail(values.email, { redirectTo });
-      if (error) throw error;
-      toast.success("If an account exists, a reset link has been sent to your email.");
-      onSuccess?.();
-    } catch (err: unknown) {
-      if (err instanceof Error) toast.error(err.message);
-      else toast.error("Failed to send reset link");
-    }
+    // Backend does not expose a password reset endpoint yet.
+    toast.info("Password reset via email isn't available yet. Please contact an admin or try again later.");
+    onSuccess?.();
   });
 
   const CardNode = (

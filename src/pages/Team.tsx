@@ -3,9 +3,8 @@ import Footer from "@/components/Footer";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { departmentList } from "@/data/teams";
 import { useEffect, useState } from "react";
-import { fetchTeamsOverview, UITeamOverview } from "@/lib/api";
+import { fetchTeamsByTournament } from "@/lib/api";
 import { Link } from "react-router-dom";
 import { Cpu, Radio, Wrench, Zap, Sigma } from "lucide-react";
 
@@ -18,15 +17,16 @@ const TeamPage = () => {
     mathematics: Sigma,
   };
 
-  const [items, setItems] = useState(departmentList.map((d) => ({ key: d.key, short: d.short, description: d.description, players: d.players.length })));
+  const [items, setItems] = useState([]);
+  const tournamentId = "example-tournament-id"; // Replace with actual tournament ID
 
   useEffect(() => {
-    fetchTeamsOverview().then((rows) => {
+    fetchTeamsByTournament(tournamentId).then((rows) => {
       if (rows && rows.length) {
-        setItems(rows.map((r) => ({ key: r.key, short: r.short, description: r.description || "", players: r.playersCount })));
+        setItems(rows.map((r) => ({ key: r.id, short: r.short, description: r.name || "", players: r.players })));
       }
     }).catch(() => void 0);
-  }, []);
+  }, [tournamentId]);
 
   return (
     <div className="min-h-screen">

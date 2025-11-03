@@ -4,7 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Calendar, MapPin, Users, ArrowRight } from "lucide-react";
 import { Link } from "react-router-dom";
-import { Tournament } from "@/data/tournaments";
+import type { UITournament as Tournament } from "@/lib/api";
 import { useEffect, useState } from "react";
 import { fetchAllTournaments } from "@/lib/api";
 

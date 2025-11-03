@@ -8,7 +8,6 @@ import { useForm } from "react-hook-form";
 import * as z from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
-import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 
 const schema = z.object({
   current: z.string().optional(),
@@ -22,17 +21,8 @@ const ChangePassword = () => {
   const form = useForm<FormValues>({ resolver: zodResolver(schema) });
 
   const onSubmit = form.handleSubmit(async (values) => {
-    if (!isSupabaseConfigured) {
-      toast.error("Supabase not configured");
-      return;
-    }
-    const { error } = await supabase.auth.updateUser({ password: values.password });
-    if (error) {
-      toast.error(error.message || "Failed to update password");
-      return;
-    }
-    toast.success("Password updated successfully");
-    form.reset();
+    // Change password flow is not available via the public API yet.
+    toast.info("Password change isn't available yet. Please contact an admin.");
   });
 
   return (

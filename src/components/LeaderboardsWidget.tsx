@@ -1,7 +1,7 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useEffect, useState } from "react";
 import { fetchLeaderboards } from "@/lib/api";
-import type { SeasonLeaderboards } from "@/data/leaderboards";
+import type { SeasonLeaderboards } from "@/lib/api";
 
 export default function LeaderboardsWidget({ stacked = false }: { stacked?: boolean }) {
   const [data, setData] = useState<SeasonLeaderboards | null>(null);

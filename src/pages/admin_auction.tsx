@@ -11,7 +11,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Gavel, Play, Pause, StopCircle, UserPlus, DollarSign, Clock, Hammer, Users, Trophy, LogOut, Settings, Search, Mic2, Zap, Crown, Target, IndianRupee, Sparkles, Award, TrendingUp, Star, Activity } from "lucide-react";
-import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import { toast } from "sonner";
 
 // Import logo and player images from src/assets
@@ -157,6 +156,19 @@ const AdminAuction = () => {
     setCurrentPlayer(mockPlayers[0]);
   }, []);
 
+  // Sell current player and advance to next available
+  const sellPlayer = React.useCallback(() => {
+    if (!currentPlayer) return;
+    const updatedPlayers: Player[] = players.map(p =>
+      p.id === currentPlayer.id ? { ...p, status: "sold" as Player["status"] } : p
+    );
+    setPlayers(updatedPlayers);
+    const nextPlayer = updatedPlayers.find(p => p.status === "available");
+    setCurrentPlayer(nextPlayer || null);
+    setTimer(60);
+    toast.success(`Player ${currentPlayer.name} sold for TK${currentPlayer.current_bid}!`);
+  }, [currentPlayer, players]);
+
   useEffect(() => {
     let interval: NodeJS.Timeout;
     if (auctionStatus === "running" && timer > 0) {
@@ -167,7 +179,7 @@ const AdminAuction = () => {
       sellPlayer();
     }
     return () => clearInterval(interval);
-  }, [auctionStatus, timer]);
+  }, [auctionStatus, timer, currentPlayer, sellPlayer]);
 
   const startAuction = () => {
     if (players.length === 0) return toast.error("No players available");
@@ -206,20 +218,7 @@ const AdminAuction = () => {
     toast.success(`Bid placed: ${amount} by ${teams.find(t => t.id === teamId)?.name}`);
   };
 
-  const sellPlayer = () => {
-    if (!currentPlayer) return;
-    
-    const updatedPlayers: Player[] = players.map(p =>
-      p.id === currentPlayer.id ? { ...p, status: "sold" as Player["status"] } : p
-    );
-    setPlayers(updatedPlayers);
-    
-    const nextPlayer = updatedPlayers.find(p => p.status === "available");
-    setCurrentPlayer(nextPlayer || null);
-    setTimer(60);
-    
-    toast.success(`Player ${currentPlayer.name} sold for TK${currentPlayer.current_bid}!`);
-  };
+  
 
   const filteredPlayers = players.filter(p =>
     p.name.toLowerCase().includes(searchTerm.toLowerCase()) || p.role.toLowerCase().includes(searchTerm.toLowerCase())

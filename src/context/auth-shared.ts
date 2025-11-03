@@ -7,6 +7,7 @@ export type User = {
   role?: string;
   session?: string;
   playerType?: string;
+  category?: string;
   semester?: string;
   paymentMethod?: string;
   paymentNumber?: string;
@@ -18,7 +19,7 @@ export type Credentials = { email: string; password: string };
 export type AuthContextValue = {
   user: User | null;
   login: (c: Credentials) => Promise<User>;
-  register: (u: { name: string; email: string; password: string; avatar?: string; playerType?: string; semester?: string; paymentMethod?: string; paymentNumber?: string; transactionId?: string; session?: string }) => Promise<User>;
+  register: (u: { name: string; email: string; password: string; category: string; avatar?: string }) => Promise<User>;
   logout: () => void;
   updateUser: (patch: Partial<User>) => void;
 };

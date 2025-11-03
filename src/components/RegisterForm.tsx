@@ -23,12 +23,10 @@ const schema = z
     email: z.string().email("Enter a valid email"),
     password: z.string().min(6, "Password must be at least 6 characters"),
     confirmPassword: z.string().min(6),
-    playerType: z.string().min(1, "Player category is required"),
-    semester: z.string().min(1, "Semester is required"),
-    paymentMethod: z.string().min(1, "Payment method is required"),
-    paymentNumber: z.string().min(1, "Payment number is required"),
-    transactionId: z.string().min(1, "Transaction ID is required"),
-    session: z.string().min(1, "Session is required"),
+    category: z.enum(["batter", "bowler", "all_rounder", "wicket_keeper"], {
+      required_error: "Player category is required",
+      invalid_type_error: "Invalid category",
+    }),
     avatar: z.string().optional(),
   })
   .refine((d) => d.password === d.confirmPassword, { path: ["confirmPassword"], message: "Passwords don't match" });
@@ -36,24 +34,19 @@ const schema = z
 type FormValues = z.infer<typeof schema>;
 
 const RegisterForm: React.FC<Props> = ({ compact = false, onSuccess }) => {
-  const { register: authRegister, updateUser } = useAuth();
+  const { register: authRegister } = useAuth();
   const fileRef = useRef<HTMLInputElement | null>(null);
 
-  const form = useForm<FormValues>({ 
-    resolver: zodResolver(schema), 
-    defaultValues: { 
-      name: "", 
-      email: "", 
-      password: "", 
-      confirmPassword: "", 
-      playerType: "", 
-      semester: "", 
-      paymentMethod: "", 
-      paymentNumber: "", 
-      transactionId: "", 
-      session: "", 
-      avatar: "" 
-    } 
+  const form = useForm<FormValues>({
+    resolver: zodResolver(schema),
+    defaultValues: {
+      name: "",
+      email: "",
+      password: "",
+      confirmPassword: "",
+      category: undefined as unknown as FormValues["category"],
+      avatar: "",
+    },
   });
 
   const onPickAvatar = () => fileRef.current?.click();
@@ -75,13 +68,8 @@ const RegisterForm: React.FC<Props> = ({ compact = false, onSuccess }) => {
         name: values.name,
         email: values.email,
         password: values.password,
+        category: values.category,
         avatar: values.avatar,
-        playerType: values.playerType,
-        semester: values.semester,
-        paymentMethod: values.paymentMethod,
-        paymentNumber: values.paymentNumber,
-        transactionId: values.transactionId,
-        session: values.session,
       });
       toast.success("Registered successfully");
       onSuccess?.();
@@ -152,74 +140,29 @@ const RegisterForm: React.FC<Props> = ({ compact = false, onSuccess }) => {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <Label htmlFor="playerType">Player Category</Label>
-                    <Controller
-                      name="playerType"
-                      control={form.control}
-                      render={({ field }) => (
-                        <Select onValueChange={field.onChange} value={field.value}>
-                          <SelectTrigger id="playerType" className="transition-all duration-200 focus:ring-2 focus:ring-blue-500">
-                            <SelectValue placeholder="Select player category" />
-                          </SelectTrigger>
-                          <SelectContent className="transition-all duration-200">
-                            <SelectItem value="Batsman">Batsman</SelectItem>
-                            <SelectItem value="Bowler">Bowler</SelectItem>
-                            <SelectItem value="All-rounder">All-rounder</SelectItem>
-                            <SelectItem value="Wicket keeper">Wicket keeper</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      )}
-                    />
-                    {form.formState.errors.playerType && <p className="text-xs text-red-500">{form.formState.errors.playerType.message}</p>}
-                  </div>
-                  <div className="space-y-1">
-                    <Label htmlFor="semester">Semester</Label>
-                    <Input id="semester" {...form.register("semester")} placeholder="e.g., 5" required aria-required className="transition-all duration-200 focus:ring-2 focus:ring-blue-500" />
-                    {form.formState.errors.semester && <p className="text-xs text-red-500">{form.formState.errors.semester.message}</p>}
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <Label htmlFor="paymentMethod">Payment Method</Label>
-                    <Controller
-                      name="paymentMethod"
-                      control={form.control}
-                      render={({ field }) => (
-                        <Select onValueChange={field.onChange} value={field.value}>
-                          <SelectTrigger id="paymentMethod" className="transition-all duration-200 focus:ring-2 focus:ring-blue-500">
-                            <SelectValue placeholder="Select payment method" />
-                          </SelectTrigger>
-                          <SelectContent className="transition-all duration-200">
-                            <SelectItem value="Bkash">Bkash</SelectItem>
-                            <SelectItem value="Nagad">Nagad</SelectItem>
-                            <SelectItem value="Rocket">Rocket</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      )}
-                    />
-                    {form.formState.errors.paymentMethod && <p className="text-xs text-red-500">{form.formState.errors.paymentMethod.message}</p>}
-                  </div>
-                  <div className="space-y-1">
-                    <Label htmlFor="paymentNumber">Payment Number</Label>
-                    <Input id="paymentNumber" {...form.register("paymentNumber")} placeholder="01XXXXXXXXX" required aria-required className="transition-all duration-200 focus:ring-2 focus:ring-blue-500" />
-                    {form.formState.errors.paymentNumber && <p className="text-xs text-red-500">{form.formState.errors.paymentNumber.message}</p>}
-                  </div>
-                </div>
-
                 <div className="space-y-1">
-                  <Label htmlFor="transactionId">Transaction ID</Label>
-                  <Input id="transactionId" {...form.register("transactionId")} required aria-required className="transition-all duration-200 focus:ring-2 focus:ring-blue-500" />
-                  {form.formState.errors.transactionId && <p className="text-xs text-red-500">{form.formState.errors.transactionId.message}</p>}
+                  <Label htmlFor="category">Player Category</Label>
+                  <Controller
+                    name="category"
+                    control={form.control}
+                    render={({ field }) => (
+                      <Select onValueChange={field.onChange} value={field.value}>
+                        <SelectTrigger id="category" className="transition-all duration-200 focus:ring-2 focus:ring-blue-500">
+                          <SelectValue placeholder="Select player category" />
+                        </SelectTrigger>
+                        <SelectContent className="transition-all duration-200">
+                          <SelectItem value="batter">Batter</SelectItem>
+                          <SelectItem value="bowler">Bowler</SelectItem>
+                          <SelectItem value="all_rounder">All-rounder</SelectItem>
+                          <SelectItem value="wicket_keeper">Wicket keeper</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    )}
+                  />
+                  {form.formState.errors.category && <p className="text-xs text-red-500">{form.formState.errors.category.message}</p>}
                 </div>
 
-                <div className="space-y-1">
-                  <Label htmlFor="session">Session</Label>
-                  <Input id="session" {...form.register("session")} placeholder="e.g., 2024-25" required aria-required className="transition-all duration-200 focus:ring-2 focus:ring-blue-500" />
-                  {form.formState.errors.session && <p className="text-xs text-red-500">{form.formState.errors.session.message}</p>}
-                </div>
+                {/* Payment and academic fields removed per new registration requirements */}
               </form>
             </div>
             {/* Fixed footer below the scroll area */}

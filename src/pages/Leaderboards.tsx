@@ -1,7 +1,8 @@
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { currentLeaderboards } from "@/data/leaderboards";
+import { useEffect, useState } from "react";
+import { fetchLeaderboards } from "@/lib/api";
 
 const Row = ({ idx, left, right }: { idx: number; left: React.ReactNode; right: React.ReactNode }) => (
   <div className="grid grid-cols-12 items-center py-2 border-b border-border last:border-0">
@@ -12,7 +13,20 @@ const Row = ({ idx, left, right }: { idx: number; left: React.ReactNode; right: 
 );
 
 const Leaderboards = () => {
-  const { batting, bowling, seasonTitle } = currentLeaderboards;
+  const [leaderboards, setLeaderboards] = useState(null);
+
+  useEffect(() => {
+    fetchLeaderboards().then((data) => {
+      setLeaderboards(data);
+    }).catch(() => void 0);
+  }, []);
+
+  if (!leaderboards) {
+    return <div>Loading...</div>;
+  }
+
+  const { batting, bowling, seasonTitle } = leaderboards;
+
   return (
     <div className="min-h-screen">
       <Navbar />

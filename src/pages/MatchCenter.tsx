@@ -2,32 +2,37 @@ import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useParams, Link } from "react-router-dom";
-import { getTournament } from "@/data/tournaments";
+import { fetchMatchById, fetchTournamentById, type UITournament, type Match } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import PointsTable from "@/components/PointsTable";
 import LeaderboardsWidget from "@/components/LeaderboardsWidget";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useEffect, useState } from "react";
-import { fetchMatchById } from "@/lib/api";
 
 const MatchCenter = () => {
   const { tournamentId, matchId } = useParams<{ tournamentId: string; matchId: string }>();
-  const staticTournament = tournamentId ? getTournament(tournamentId) : undefined;
-  const staticMatch = staticTournament?.matches.find((m) => m.id === matchId);
-  const [tournament, setTournament] = useState(staticTournament || null);
-  const [tournamentTitle, setTournamentTitle] = useState<string>(staticTournament?.title || "Tournament");
-  const [match, setMatch] = useState(staticMatch || null);
+  const [tournament, setTournament] = useState<UITournament | null>(null);
+  const [tournamentTitle, setTournamentTitle] = useState<string>("Tournament");
+  const [match, setMatch] = useState<Match | null>(null);
 
   useEffect(() => {
     if (!tournamentId || !matchId) return;
-    fetchMatchById(tournamentId, matchId).then((res) => {
-      if (res) {
-        setTournamentTitle(res.tournamentTitle);
-        setMatch(res.match);
+    let mounted = true;
+    (async () => {
+      const [tRes, mRes] = await Promise.all([
+        fetchTournamentById(tournamentId),
+        fetchMatchById(tournamentId, matchId),
+      ]);
+      if (!mounted) return;
+      if (tRes) setTournament(tRes);
+      if (mRes) {
+        setTournamentTitle(mRes.tournamentTitle);
+        setMatch(mRes.match);
       }
-    }).catch(() => void 0);
-  }, [tournamentId, matchId, staticTournament]);
+    })().catch(() => void 0);
+    return () => { mounted = false; };
+  }, [tournamentId, matchId]);
 
   if (!tournament || !match) {
     return (
