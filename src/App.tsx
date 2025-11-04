@@ -29,6 +29,8 @@ import Terms from "./pages/Terms";
 import Rules from "./pages/Rules";
 import AdminAuction from "./pages/admin_auction";
 import { AdminAuctionPlayerDetails } from "./pages/admin_auction_player_details";
+import AdPopup from "@/components/AdPopup";
+import ScrollToTop from "@/components/ScrollToTop";
 import { AdminPlayerImagePage } from "./pages/admin_player_image";
 
 
@@ -45,6 +47,8 @@ const App = () => (
       
         <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
           <ErrorBoundary>
+          <ScrollToTop />
+          <AdPopup />
           <Routes>
             <Route path="/" element={<Index />} />
             <Route path="/about" element={<AboutPage />} />

@@ -1,7 +1,7 @@
 import { Link, useLocation } from "react-router-dom";
 import { Button } from "./ui/button";
 import { Menu, X, LogOut, User, Settings, KeyRound, ShieldCheck } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useAuth } from "@/context/useAuth";
 import LoginModal from "./LoginModal";
 import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
@@ -15,6 +15,7 @@ import {
 } from "./ui/dropdown-menu";
 import { useNavigate } from "react-router-dom";
 import logoUrl from "@/assets/cpl2026logo.png";
+import { getAuctionStatus } from "@/lib/api";
 
 const Navbar = () => {
   const [isOpen, setIsOpen] = useState(false);
@@ -23,6 +24,30 @@ const Navbar = () => {
 
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const [auctionLive, setAuctionLive] = useState<boolean>(false);
+
+  // Poll auction live status (initial + periodic)
+  useEffect(() => {
+    let mounted = true;
+    const fetchStatus = async () => {
+      try {
+        const raw = await getAuctionStatus();
+        // Accept common shapes: { live: true }, { is_live: true }, { status: true }, true/false
+        let val = false;
+        if (typeof raw === 'boolean') val = raw;
+        else if (raw && typeof raw === 'object') {
+          const r = raw as Record<string, unknown>;
+          val = Boolean(r.live ?? r.is_live ?? r.status ?? r.value);
+        }
+        if (mounted) setAuctionLive(!!val);
+      } catch (_) {
+        if (mounted) setAuctionLive(false);
+      }
+    };
+    fetchStatus();
+    const id = setInterval(fetchStatus, 30000);
+    return () => { mounted = false; clearInterval(id); };
+  }, []);
 
   const navLinks = [
     { name: "Home", path: "/" },
@@ -67,6 +92,13 @@ const Navbar = () => {
                 {link.name}
               </Link>
             ))}
+            {auctionLive && (
+              <Link to="/auction" className="ml-2">
+                <span className="px-3 py-1 rounded-full text-xs font-semibold bg-emerald-600 text-white animate-pulse hover:brightness-110">
+                  Live
+                </span>
+              </Link>
+            )}
           </div>
 
           {/* Auth Buttons */}
@@ -146,6 +178,15 @@ const Navbar = () => {
                   {link.name}
                 </Link>
               ))}
+              {auctionLive && (
+                <div className="px-4 py-2">
+                  <Link to="/auction" onClick={() => setIsOpen(false)}>
+                    <span className="inline-block px-3 py-1 rounded-full text-xs font-semibold bg-emerald-600 text-white animate-pulse hover:brightness-110">
+                      Live
+                    </span>
+                  </Link>
+                </div>
+              )}
               {!user ? (
                 <>
                   <Button variant="default" className="w-full bg-gradient-accent" onClick={() => { setIsOpen(false); setLoginOpen(true); }}>

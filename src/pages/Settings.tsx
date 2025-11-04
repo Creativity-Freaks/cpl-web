@@ -119,7 +119,7 @@ const Settings = () => {
                 <div className="grid sm:grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="name">Name</Label>
-                    <Input id="name" defaultValue={user.name} onBlur={(e) => updateUser({ name: e.target.value })} />
+                    <Input id="name" value={name} onChange={(e) => setName(e.target.value)} />
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="email">Email</Label>
@@ -129,7 +129,7 @@ const Settings = () => {
 
                 <div className="space-y-2">
                   <Label htmlFor="category">Player Category</Label>
-                  <Select value={category} onValueChange={(v) => { setCategory(v); updateUser({ category: v }); }}>
+                  <Select value={category} onValueChange={(v) => { setCategory(v); }}>
                     <SelectTrigger id="category">
                       <SelectValue placeholder="Select player category" />
                     </SelectTrigger>
@@ -143,7 +143,7 @@ const Settings = () => {
                 </div>
 
                 <div>
-                  <Button className="bg-gradient-accent" onClick={() => toast.success("Saved changes")}>Save Changes</Button>
+                  <Button className="bg-gradient-accent" disabled={saving} onClick={onSave}>{saving ? 'Saving…' : 'Save Changes'}</Button>
                 </div>
               </CardContent>
             </Card>

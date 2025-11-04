@@ -1,13 +1,15 @@
 import { Card, CardContent } from "./ui/card";
+import cftechLogo from "@/assets/cftech.png";
 
 const Sponsors = () => {
+  // Demo sponsors list using the same sample logo (cftech.png) as requested
   const sponsors = [
-    { name: "Sponsor 1", tier: "Gold" },
-    { name: "Sponsor 2", tier: "Gold" },
-    { name: "Sponsor 3", tier: "Silver" },
-    { name: "Sponsor 4", tier: "Silver" },
-    { name: "Sponsor 5", tier: "Bronze" },
-    { name: "Sponsor 6", tier: "Bronze" },
+    { name: "CFTech Lab", tier: "Title Sponsor", logo: cftechLogo },
+    { name: "CFTech Lab", tier: "Gold", logo: cftechLogo },
+    { name: "CFTech Lab", tier: "Gold", logo: cftechLogo },
+    { name: "CFTech Lab", tier: "Silver", logo: cftechLogo },
+    { name: "CFTech Lab", tier: "Silver", logo: cftechLogo },
+    { name: "CFTech Lab", tier: "Bronze", logo: cftechLogo },
   ];
 
   return (
@@ -29,13 +31,13 @@ const Sponsors = () => {
               className="bg-background/10 backdrop-blur-sm border-primary-foreground/20 hover:bg-background/20 transition-all duration-300 hover:-translate-y-2 animate-scale-in"
               style={{ animationDelay: `${index * 0.05}s` }}
             >
-              <CardContent className="p-6 flex flex-col items-center justify-center space-y-2 h-32">
-                <div className="w-12 h-12 rounded-lg bg-gradient-accent flex items-center justify-center shadow-accent">
-                  <span className="text-accent-foreground font-bold text-xl">
-                    {sponsor.name.split(' ')[1]}
-                  </span>
-                </div>
-                <p className="text-xs text-primary-foreground/80 font-medium">{sponsor.tier}</p>
+              <CardContent className="p-6 flex flex-col items-center justify-center gap-3 h-32">
+                <img
+                  src={sponsor.logo}
+                  alt={`${sponsor.name} logo`}
+                  className="h-16 md:h-20 object-contain grayscale hover:grayscale-0 transition-all duration-300 drop-shadow"
+                />
+                <p className="text-xs text-primary-foreground/80 font-medium text-center">{sponsor.tier}</p>
               </CardContent>
             </Card>
           ))}

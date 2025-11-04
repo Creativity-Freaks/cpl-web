@@ -47,6 +47,20 @@ const TournamentDetails = () => {
     );
   }
 
+  const chipColor = (cls?: string, status?: string) => {
+    if (cls && cls.trim() !== "") return cls;
+    switch (status) {
+      case "Live":
+        return "bg-emerald-600";
+      case "Upcoming":
+        return "bg-amber-600";
+      case "Completed":
+        return "bg-slate-600";
+      default:
+        return "bg-muted-foreground";
+    }
+  };
+
   return (
     <div className="min-h-screen">
       <Navbar />
@@ -76,8 +90,10 @@ const TournamentDetails = () => {
           {/* Header */}
           <div className="max-w-5xl mx-auto mb-8">
             <div className="flex items-center gap-3 mb-2">
-              <h1 className="text-4xl md:text-5xl font-bold text-foreground">{data.title}</h1>
-              <span className={`px-2.5 py-1 rounded-full text-xs font-medium text-white ${data.statusColor}`}>{data.status}</span>
+              <h1 className="text-4xl md:text-5xl font-bold text-foreground">
+                {data.title} {data.year ? <span className="text-accent">({data.year})</span> : null}
+              </h1>
+              <span className={`px-2.5 py-1 rounded-full text-xs font-medium text-white ${chipColor(data.statusColor, data.status)}`}>{data.status}</span>
             </div>
             <p className="text-muted-foreground mb-4">{data.description}</p>
             <div className="h-px w-full bg-gradient-to-r from-transparent via-accent/40 to-transparent my-6" />
@@ -123,7 +139,7 @@ const TournamentDetails = () => {
           </div>
 
           {/* About */}
-          <Card id="about" className="border-border max-w-5xl mx-auto">
+          <Card id="about" className="border-border max-w-5xl mx-auto scroll-mt-24">
             <CardHeader>
               <CardTitle className="text-2xl">About this Tournament</CardTitle>
               <CardDescription>{data.title} • Professional T10 cricket within the CSE community.</CardDescription>
@@ -134,7 +150,7 @@ const TournamentDetails = () => {
           </Card>
 
           {/* Participants & Summary */}
-          <div id="participants" className="max-w-5xl mx-auto mt-8 grid lg:grid-cols-2 gap-8">
+          <div id="participants" className="max-w-5xl mx-auto mt-8 grid lg:grid-cols-2 gap-8 scroll-mt-24">
             <Card className="border-border">
               <CardHeader>
                 <CardTitle className="text-2xl">Participating Teams</CardTitle>
@@ -152,7 +168,7 @@ const TournamentDetails = () => {
             </Card>
 
             {data.status === 'Completed' && (
-              <Card id="champions" className="border-border">
+              <Card id="champions" className="border-border scroll-mt-24">
                 <CardHeader>
                   <CardTitle className="text-2xl">Champions & Runner-up</CardTitle>
                   <CardDescription>Season {data.title}</CardDescription>
@@ -174,12 +190,12 @@ const TournamentDetails = () => {
 
           {/* Points & Leaderboards */}
           <div className="max-w-5xl mx-auto mt-8 space-y-8">
-            <div id="points"><PointsTable compact /></div>
-            <div id="leaderboards"><LeaderboardsWidget /></div>
+            <div id="points" className="scroll-mt-24"><PointsTable compact /></div>
+            <div id="leaderboards" className="scroll-mt-24"><LeaderboardsWidget /></div>
           </div>
 
           {/* Notes */}
-          <Card id="format" className="border-border max-w-5xl mx-auto mt-8">
+          <Card id="format" className="border-border max-w-5xl mx-auto mt-8 scroll-mt-24">
             <CardHeader>
               <CardTitle className="text-2xl">Format & Conditions</CardTitle>
               <CardDescription>Summary of rules</CardDescription>

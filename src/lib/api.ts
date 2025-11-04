@@ -127,6 +127,12 @@ export const fetchTournamentById = async (id: string): Promise<UITournament | nu
       matches: Array.isArray(t.matches) ? (t.matches as Match[]) : [],
     };
   } catch (_) {
+    // Fallback: derive from the tournaments list if details endpoint is unavailable
+    try {
+      const all = await fetchTournaments();
+      const found = all.find((x) => String(x.id) === String(id));
+      if (found) return found;
+    } catch { /* noop */ }
     return null;
   }
 };

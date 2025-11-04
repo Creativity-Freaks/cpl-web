@@ -1,13 +1,14 @@
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import { useAuth } from "@/context/useAuth";
-import { LogOut, User, Trophy, CalendarDays } from "lucide-react";
+import { User, Trophy, CalendarDays } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { resolveProfileImageUrl } from "@/lib/api";
 
 const PlayerDashboard = () => {
-  const { user, logout } = useAuth();
+  const { user } = useAuth();
+  const profileImage = user?.avatar ? resolveProfileImageUrl(user.avatar) : null;
 
   return (
     <div className="min-h-screen">
@@ -65,13 +66,26 @@ const PlayerDashboard = () => {
               </CardContent>
             </Card>
 
-            <Card className="border-border hover:shadow-glow transition-all animate-fade-in-up">
+            {/* Removed Actions card as requested */}
+          </div>
+
+          {/* Full profile image preview (from API) */}
+          <div className="mt-10 animate-fade-in-up">
+            <Card className="border-border overflow-hidden">
               <CardHeader>
-                <CardTitle>Actions</CardTitle>
-                <CardDescription>Manage your session</CardDescription>
+                <CardTitle>Profile Photo</CardTitle>
+                <CardDescription>Please upload a high resolution photo. This photo is use in auction  {"{filename}"}</CardDescription>
               </CardHeader>
               <CardContent>
-                <Button variant="destructive" onClick={logout} className="flex items-center gap-2"><LogOut className="h-4 w-4"/> Logout</Button>
+                {profileImage ? (
+                  <img
+                    src={profileImage}
+                    alt="Profile"
+                    className="w-full max-h-[70vh] object-contain rounded-lg shadow-glow"
+                  />
+                ) : (
+                  <p className="text-sm text-muted-foreground">No profile image uploaded yet.</p>
+                )}
               </CardContent>
             </Card>
           </div>

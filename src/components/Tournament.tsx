@@ -75,7 +75,9 @@ const Tournament = () => {
               <div className="h-2 bg-gradient-accent"></div>
               <CardHeader>
                 <div className="flex items-start justify-between mb-2">
-                  <CardTitle className="text-2xl">{tournament.title} {tournament.year ? `(${tournament.year})` : ''}</CardTitle>
+                  <CardTitle className="text-2xl">
+                    {tournament.title} {tournament.year ? (<span className="text-accent">({tournament.year})</span>) : ''}
+                  </CardTitle>
                   <span className={`${tournament.statusColor || 'bg-accent'} text-white px-3 py-1 rounded-full text-xs font-medium`}>
                     {tournament.status || 'Upcoming'}
                   </span>

@@ -35,11 +35,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           existing = raw ? (JSON.parse(raw) as User) : null;
         } catch { /* ignore */ }
         const base: User = existing || { name: 'User', email: '' };
+        // Prefer locally saved values for user-editable fields (name, avatar, category)
+        // so that a refresh doesn't overwrite changes when the backend doesn't persist them yet.
         const merged: User = {
           ...base,
-          name: prof.name || base.name,
-          avatar: prof.avatarUrl ?? base.avatar ?? null,
-          category: prof.category ?? base.category,
+          name: base.name || prof.name || 'User',
+          avatar: base.avatar ?? prof.avatarUrl ?? null,
+          category: base.category ?? prof.category,
+          // Always refresh stats from server when available
           runs: prof.runs,
           battingStrikeRate: prof.batting_strike_rate,
           wickets: prof.wickets,
