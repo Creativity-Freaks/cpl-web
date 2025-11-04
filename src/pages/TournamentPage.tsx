@@ -11,12 +11,22 @@ import { fetchAllTournaments } from "@/lib/api";
 
 const TournamentPage = () => {
   const [source, setSource] = useState<Tournament[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     let mounted = true;
     (async () => {
-      const list = await fetchAllTournaments();
-      if (!mounted) return;
-      setSource(list);
+      try {
+        setLoading(true);
+        const list = await fetchAllTournaments();
+        if (!mounted) return;
+        setSource(list);
+      } catch (e) {
+        if (!mounted) return;
+        setError("Failed to load tournaments");
+      } finally {
+        if (mounted) setLoading(false);
+      }
     })();
     return () => { mounted = false; };
   }, []);
@@ -24,6 +34,7 @@ const TournamentPage = () => {
   const currentTournaments = source.filter((t) => t.status === "Live");
   const upcomingTournaments = source.filter((t) => t.status === "Upcoming");
   const pastTournaments = source.filter((t) => t.status === "Completed");
+  const noSections = !loading && source.length > 0 && currentTournaments.length === 0 && upcomingTournaments.length === 0 && pastTournaments.length === 0;
 
   const renderTournamentCard = (tournament: Tournament, index: number) => (
     <Card 
@@ -34,7 +45,7 @@ const TournamentPage = () => {
       <div className="h-2 bg-gradient-accent"></div>
       <CardHeader>
         <div className="flex items-start justify-between mb-2">
-          <CardTitle className="text-2xl">{tournament.title}</CardTitle>
+          <CardTitle className="text-2xl">{tournament.title} {tournament.year ? `(${tournament.year})` : ''}</CardTitle>
           <span className={`${tournament.statusColor} text-white px-3 py-1 rounded-full text-xs font-medium`}>
             {tournament.status}
           </span>
@@ -97,6 +108,16 @@ const TournamentPage = () => {
 
         <div className="container mx-auto px-4 mt-8">
 
+          {loading && (
+            <div className="text-center text-muted-foreground py-12">Loading tournaments…</div>
+          )}
+
+          {!loading && source.length === 0 && (
+            <div className="text-center text-muted-foreground py-12">
+              No tournaments available.
+            </div>
+          )}
+
           {/* Live Tournaments */}
           {currentTournaments.length > 0 && (
             <section className="space-y-6 mb-12">
@@ -136,7 +157,17 @@ const TournamentPage = () => {
             </section>
           )}
 
-          {/* Only tournament sections, as requested */}
+          {noSections && (
+            <section className="mb-14">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-3xl font-bold">All Tournaments</h2>
+                <div className="text-sm text-muted-foreground">{source.length} total</div>
+              </div>
+              <div className="grid lg:grid-cols-2 gap-8">
+                {source.map((tournament, index) => renderTournamentCard(tournament, index))}
+              </div>
+            </section>
+          )}
         </div>
       </main>
       <Footer />

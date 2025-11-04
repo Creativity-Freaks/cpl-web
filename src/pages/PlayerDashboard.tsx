@@ -36,9 +36,7 @@ const PlayerDashboard = () => {
               <CardContent className="space-y-2">
                 <p><span className="text-muted-foreground">Name:</span> {user?.name}</p>
                 <p><span className="text-muted-foreground">Email:</span> {user?.email}</p>
-                <p><span className="text-muted-foreground">Role:</span> {user?.role}</p>
-                {user?.session && <p><span className="text-muted-foreground">Session:</span> {user.session}</p>}
-                {user?.playerType && <p><span className="text-muted-foreground">Player Type:</span> {user.playerType}</p>}
+                {user?.category && <p><span className="text-muted-foreground">Category:</span> {user.category}</p>}
               </CardContent>
             </Card>
 
@@ -57,8 +55,13 @@ const PlayerDashboard = () => {
                 <CardTitle className="flex items-center gap-2"><Trophy className="h-5 w-5 text-accent"/> Performance</CardTitle>
                 <CardDescription>Stats and achievements</CardDescription>
               </CardHeader>
-              <CardContent>
-                <p className="text-sm text-muted-foreground">Stats coming soon.</p>
+              <CardContent className="grid grid-cols-2 gap-4">
+                <p><span className="text-muted-foreground">Runs:</span> {user?.runs ?? 0}</p>
+                <p><span className="text-muted-foreground">Batting SR:</span> {user?.battingStrikeRate ?? 0}</p>
+                <p><span className="text-muted-foreground">Wickets:</span> {user?.wickets ?? 0}</p>
+                <p><span className="text-muted-foreground">Bowling SR:</span> {user?.bowlingStrikeRate ?? 0}</p>
+                <p><span className="text-muted-foreground">Overs Bowled:</span> {user?.oversBowled ?? 0}</p>
+                <p><span className="text-muted-foreground">Runs Conceded:</span> {user?.totalRunsConceded ?? 0}</p>
               </CardContent>
             </Card>
 

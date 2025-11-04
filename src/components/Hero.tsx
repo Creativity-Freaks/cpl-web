@@ -3,21 +3,30 @@ import { ArrowRight, Calendar, Trophy } from "lucide-react";
 import { Link } from "react-router-dom";
 import bannerImage from "@/assets/hero-cricket.jpg";
 import { useEffect, useState } from "react";
-import { fetchUpcomingTournaments } from "@/lib/api";
+import { fetchAllTournaments } from "@/lib/api";
 
 const Hero = () => {
   const [seasonTitle, setSeasonTitle] = useState<string | null>(null);
   const [dateRange, setDateRange] = useState<string | null>(null);
+  const [seasonYear, setSeasonYear] = useState<string | null>(null);
 
   useEffect(() => {
     let mounted = true;
     (async () => {
-      const list = await fetchUpcomingTournaments();
+      const list = await fetchAllTournaments();
       if (!mounted) return;
       if (Array.isArray(list) && list.length > 0) {
-        const first = list[0];
-        setSeasonTitle(first.title || null);
-        setDateRange(first.date || null);
+        // Prefer a live tournament, fallback to upcoming, then any
+        const live = list.find((t) => t.status === "Live");
+        const upcoming = list.find((t) => t.status === "Upcoming");
+        const chosen = live || upcoming || list[0];
+        setSeasonTitle(chosen.title || null);
+        setDateRange(chosen.date || null);
+        // Use explicit year if available, else try to parse from date range or title
+        const yr = chosen.year
+          || (chosen.date ? (chosen.date.match(/\d{4}/)?.[0] ?? null) : null)
+          || (chosen.title ? (chosen.title.match(/\d{4}/)?.[0] ?? null) : null);
+        setSeasonYear(yr ? String(yr) : null);
       }
     })();
     return () => { mounted = false; };
@@ -45,7 +54,7 @@ const Hero = () => {
           {/* Main Heading */}
           <h1 className="text-5xl md:text-7xl font-bold text-primary-foreground leading-tight">
             {seasonTitle ?? 'CSE Premier League'}
-            <span className="block text-accent mt-2">{seasonTitle ? seasonTitle.split(' ').slice(-1)[0] : '2026'}</span>
+            <span className="block text-accent mt-2">{seasonYear ?? '2026'}</span>
           </h1>
 
           {/* Subheading */}

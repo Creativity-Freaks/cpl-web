@@ -1,4 +1,4 @@
-import React, { useRef } from "react";
+import React from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -9,8 +9,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { useAuth } from "@/context/useAuth";
 import { toast } from "sonner";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Camera } from "lucide-react";
+// Avatar upload has been removed from registration; users can upload from Settings
 
 type Props = {
   compact?: boolean;
@@ -27,7 +26,6 @@ const schema = z
       required_error: "Player category is required",
       invalid_type_error: "Invalid category",
     }),
-    avatar: z.string().optional(),
   })
   .refine((d) => d.password === d.confirmPassword, { path: ["confirmPassword"], message: "Passwords don't match" });
 
@@ -35,7 +33,6 @@ type FormValues = z.infer<typeof schema>;
 
 const RegisterForm: React.FC<Props> = ({ compact = false, onSuccess }) => {
   const { register: authRegister } = useAuth();
-  const fileRef = useRef<HTMLInputElement | null>(null);
 
   const form = useForm<FormValues>({
     resolver: zodResolver(schema),
@@ -45,22 +42,8 @@ const RegisterForm: React.FC<Props> = ({ compact = false, onSuccess }) => {
       password: "",
       confirmPassword: "",
       category: undefined as unknown as FormValues["category"],
-      avatar: "",
     },
   });
-
-  const onPickAvatar = () => fileRef.current?.click();
-  const onAvatar = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0];
-    if (!f) return;
-    // Accept common image MIME types. If the browser doesn't provide a proper
-    // MIME type, still attempt to read the file as a data URL to allow uploads
-    // for various image formats.
-    if (f.type && !f.type.startsWith("image/")) return toast.error("Select an image file");
-    const reader = new FileReader();
-    reader.onload = () => form.setValue("avatar", reader.result as string);
-    reader.readAsDataURL(f);
-  };
 
   const onSubmit = form.handleSubmit(async (values) => {
     try {
@@ -69,7 +52,6 @@ const RegisterForm: React.FC<Props> = ({ compact = false, onSuccess }) => {
         email: values.email,
         password: values.password,
         category: values.category,
-        avatar: values.avatar,
       });
       toast.success("Registered successfully");
       onSuccess?.();
@@ -97,23 +79,7 @@ const RegisterForm: React.FC<Props> = ({ compact = false, onSuccess }) => {
           <div className="flex flex-col max-h-[80vh]">
             <div className="overflow-auto p-6">
               <form id="register-form" onSubmit={onSubmit} className="space-y-4">
-                <div className="flex flex-col items-center gap-3">
-                  <div className="relative transition-all duration-200 hover:scale-105">
-                    <Avatar className="h-20 w-20 border-2 border-gray-300 transition-all duration-200 hover:border-blue-500">
-                      <AvatarImage src={form.watch("avatar") || ""} alt={form.watch("name") || "avatar"} />
-                      <AvatarFallback className="bg-gray-300 text-gray-800">{(form.watch("name") || "P").slice(0, 2).toUpperCase()}</AvatarFallback>
-                    </Avatar>
-                    <button 
-                      type="button" 
-                      onClick={onPickAvatar} 
-                      className="absolute -bottom-1 -right-1 h-8 w-8 rounded-full bg-gray-300 text-gray-800 flex items-center justify-center shadow-gray-300 hover:bg-blue-500 hover:text-white transition-all duration-200" 
-                      aria-label="Change avatar"
-                    >
-                      <Camera className="h-4 w-4" />
-                    </button>
-                  </div>
-                  <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onAvatar} aria-hidden />
-                </div>
+                {/* Avatar upload removed from registration. Please upload from Profile Settings after account creation. */}
 
                 <div className="space-y-1">
                   <Label htmlFor="name">Full name</Label>

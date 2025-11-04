@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { AuthContext, AuthContextValue, User, Credentials } from './auth-shared';
-import { login as apiLogin, registerUser as apiRegister, getAuthToken } from "@/lib/api";
+import { login as apiLogin, registerUser as apiRegister, getAuthToken, fetchCurrentPlayerProfile } from "@/lib/api";
 
 const STORAGE_USERS = "cpl_users";
 const STORAGE_CURRENT = "cpl_current_user";
@@ -18,10 +18,40 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   });
 
   // On mount: if a token exists and a user is saved, we're logged in.
+  const hydratedRef = useRef(false);
   useEffect(() => {
     const tok = getAuthToken();
-    if (!tok) return; // keep any existing user from localStorage
-    // Optionally, we could decode JWT or fetch profile if backend provides it.
+    if (!tok || hydratedRef.current) return; // keep any existing user from localStorage
+    hydratedRef.current = true;
+    // Fetch and hydrate profile info if available
+    (async () => {
+      try {
+        const prof = await fetchCurrentPlayerProfile();
+        if (!prof) return;
+        // Read existing persisted user to avoid dependency on state and re-render loops
+        let existing: User | null = null;
+        try {
+          const raw = localStorage.getItem(STORAGE_CURRENT);
+          existing = raw ? (JSON.parse(raw) as User) : null;
+        } catch { /* ignore */ }
+        const base: User = existing || { name: 'User', email: '' };
+        const merged: User = {
+          ...base,
+          name: prof.name || base.name,
+          avatar: prof.avatarUrl ?? base.avatar ?? null,
+          category: prof.category ?? base.category,
+          runs: prof.runs,
+          battingStrikeRate: prof.batting_strike_rate,
+          wickets: prof.wickets,
+          bowlingStrikeRate: prof.bowling_strike_rate,
+          oversBowled: prof.overs_bowled,
+          totalRunsConceded: prof.total_runs_conceded,
+        };
+        persistCurrent(merged);
+      } catch (_) {
+        // ignore
+      }
+    })();
   }, []);
 
   const persistCurrent = (u: User | null) => {
@@ -38,14 +68,33 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const res = await apiLogin(email, password);
     // Persist token
     localStorage.setItem(ACCESS_TOKEN_KEY, res.access_token);
-    // Minimal user shape; extend if your backend provides profile fetch.
-    const u: User = { name: email.split('@')[0] || 'User', email };
-    persistCurrent(u);
-    return u;
+    // Try to fetch profile after login
+    try {
+      const prof = await fetchCurrentPlayerProfile();
+      if (prof) {
+        const u: User = {
+          name: prof.name || email.split('@')[0] || 'User',
+          email,
+          avatar: prof.avatarUrl || null,
+          category: prof.category,
+          runs: prof.runs,
+          battingStrikeRate: prof.batting_strike_rate,
+          wickets: prof.wickets,
+          bowlingStrikeRate: prof.bowling_strike_rate,
+          oversBowled: prof.overs_bowled,
+          totalRunsConceded: prof.total_runs_conceded,
+        };
+        persistCurrent(u);
+        return u;
+      }
+    } catch (_) { /* ignore and fallback */ }
+    const fallback: User = { name: email.split('@')[0] || 'User', email };
+    persistCurrent(fallback);
+    return fallback;
   };
 
-  const register = async ({ name, email, password, category, avatar }: { name: string; email: string; password: string; category: string; avatar?: string }) => {
-    const payload: Record<string, unknown> = { name, email, password, category, avatar };
+  const register = async ({ name, email, password, category }: { name: string; email: string; password: string; category: string }) => {
+    const payload: Record<string, unknown> = { name, email, password, category };
     await apiRegister(payload);
     const u = await login({ email, password });
     return u;

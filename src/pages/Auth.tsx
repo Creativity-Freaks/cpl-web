@@ -5,12 +5,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { useAuth } from "@/context/useAuth";
 import { useLocation, useNavigate } from "react-router-dom";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Camera } from "lucide-react";
+// Avatar selection for registration has been removed; users can upload from Settings
 import heroImg from "@/assets/hero-cricket.jpg";
 import { Switch } from "@/components/ui/switch";
 import { useForm } from "react-hook-form";
@@ -37,7 +36,6 @@ const Auth: React.FC<AuthProps> = ({ initialTab, compact = false, onSuccess }) =
       email: z.string().email("Enter a valid email"),
       password: z.string().min(6, "Password must be at least 6 characters"),
       confirmPassword: z.string().min(6, "Confirm your password"),
-      avatar: z.string().optional(),
     })
     .refine((data) => data.password === data.confirmPassword, {
       path: ["confirmPassword"],
@@ -46,9 +44,8 @@ const Auth: React.FC<AuthProps> = ({ initialTab, compact = false, onSuccess }) =
   type RegisterFormValues = z.infer<typeof registerSchema>;
 
   const loginForm = useForm<LoginFormValues>({ resolver: zodResolver(loginSchema), defaultValues: { email: "", password: "", remember: true } });
-  const registerForm = useForm<RegisterFormValues>({ resolver: zodResolver(registerSchema), defaultValues: { name: "", email: "", password: "", confirmPassword: "", avatar: "" } });
+  const registerForm = useForm<RegisterFormValues>({ resolver: zodResolver(registerSchema), defaultValues: { name: "", email: "", password: "", confirmPassword: "" } });
 
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const { user, login, register } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
@@ -87,7 +84,7 @@ const Auth: React.FC<AuthProps> = ({ initialTab, compact = false, onSuccess }) =
 
   const handleRegister = registerForm.handleSubmit(async (values) => {
     try {
-      await register({ name: values.name, email: values.email, password: values.password, avatar: values.avatar });
+      await register({ name: values.name, email: values.email, password: values.password });
       toast.success("Registration successful");
       onSuccess?.();
       navigate("/dashboard");
@@ -96,21 +93,7 @@ const Auth: React.FC<AuthProps> = ({ initialTab, compact = false, onSuccess }) =
     }
   });
 
-  const onPickAvatar = () => fileInputRef.current?.click();
-  const onAvatarChosen: React.ChangeEventHandler<HTMLInputElement> = (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (!file.type.startsWith("image/")) {
-      toast.error("Please select an image file");
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = reader.result as string;
-      registerForm.setValue("avatar", result, { shouldDirty: true, shouldValidate: false });
-    };
-    reader.readAsDataURL(file);
-  };
+  // Avatar upload removed from registration. Please upload from Profile Settings after account creation.
 
   const AuthCard = (
     <div className="w-full max-w-md mx-auto p-4">
@@ -164,18 +147,7 @@ const Auth: React.FC<AuthProps> = ({ initialTab, compact = false, onSuccess }) =
 
             <TabsContent value="register">
               <form onSubmit={handleRegister} className="space-y-5">
-                <div className="flex flex-col items-center gap-3">
-                  <div className="relative">
-                    <Avatar className="h-20 w-20">
-                      <AvatarImage src={registerForm.watch("avatar") || ""} alt={registerForm.watch("name") || "avatar"} />
-                      <AvatarFallback>{(registerForm.watch("name") || "P").slice(0, 2).toUpperCase()}</AvatarFallback>
-                    </Avatar>
-                    <button type="button" onClick={onPickAvatar} className="absolute -bottom-1 -right-1 h-8 w-8 rounded-full bg-accent text-accent-foreground flex items-center justify-center shadow-accent" aria-label="Change avatar">
-                      <Camera className="h-4 w-4" />
-                    </button>
-                  </div>
-                  <input ref={fileInputRef} onChange={onAvatarChosen} type="file" accept="image/*" className="hidden" />
-                </div>
+                {/* Avatar selection removed from registration */}
 
                 <div className="space-y-2">
                   <Label htmlFor="register-name">Full Name</Label>

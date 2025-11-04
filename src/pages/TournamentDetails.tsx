@@ -3,7 +3,7 @@ import Footer from "@/components/Footer";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Calendar, MapPin, Users, Trophy } from "lucide-react";
 import { useParams, Link } from "react-router-dom";
-import { fetchTournamentById, UITournament } from "@/lib/api";
+import { fetchTournamentById, UITournament, fetchTeamsByTournament, UITeamOverview } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import PointsTable from "@/components/PointsTable";
 import LeaderboardsWidget from "@/components/LeaderboardsWidget";
@@ -12,12 +12,18 @@ import { useEffect, useState } from "react";
 const TournamentDetails = () => {
   const { id } = useParams<{ id: string }>();
   const [data, setData] = useState<UITournament | null>(null);
+  const [teams, setTeams] = useState<UITeamOverview[]>([]);
 
   useEffect(() => {
     if (!id) return;
-    fetchTournamentById(id).then((t) => {
-      if (t) setData(t);
-    });
+    (async () => {
+      const t = await fetchTournamentById(id);
+      if (t) setData({ ...t, venue: t.venue || "PSTU Central Playground" });
+      try {
+        const list = await fetchTeamsByTournament(id);
+        setTeams(list);
+      } catch { /* ignore */ }
+    })();
   }, [id]);
 
   if (!data) {
@@ -131,13 +137,17 @@ const TournamentDetails = () => {
           <div id="participants" className="max-w-5xl mx-auto mt-8 grid lg:grid-cols-2 gap-8">
             <Card className="border-border">
               <CardHeader>
-                <CardTitle className="text-2xl">Participating Departments</CardTitle>
-                <CardDescription>Fixed 5 teams format</CardDescription>
+                <CardTitle className="text-2xl">Participating Teams</CardTitle>
+                <CardDescription>{teams.length} teams</CardDescription>
               </CardHeader>
               <CardContent className="flex flex-wrap gap-2">
-                {["CSIT","CCE","PME","EEE","Mathematics"].map((d) => (
-                  <span key={d} className="px-3 py-1 rounded-full bg-accent/10 text-accent text-sm">{d}</span>
-                ))}
+                {teams.length > 0 ? (
+                  teams.map((t) => (
+                    <span key={t.id} className="px-3 py-1 rounded-full bg-accent/10 text-accent text-sm">{t.short || t.name}</span>
+                  ))
+                ) : (
+                  <span className="text-sm text-muted-foreground">No teams found for this tournament.</span>
+                )}
               </CardContent>
             </Card>
 

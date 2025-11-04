@@ -39,6 +39,7 @@ export type UITournament = {
   title: string;
   description?: string;
   date?: string;
+  year?: string;
   teams?: number;
   venue?: string;
   status: "Live" | "Upcoming" | "Completed";
@@ -107,17 +108,23 @@ export const fetchTeamsOverview = async (): Promise<UITeamOverview[]> => {
 
 export const fetchTournamentById = async (id: string): Promise<UITournament | null> => {
   try {
-    const resp = await fetch(buildUrl(`/api/v1/admin/tournaments/${id}`));
-    if (!resp.ok) throw new Error("tournament fetch failed");
-    const t = await resp.json();
+    type Resp = Partial<UITournament> & { id: string | number; name?: string; title?: string; teams_count?: number; venue?: string; matches?: Match[]; start_date?: string; end_date?: string; date?: string; status?: string; year?: string | number };
+    const t = await apiFetchJson<Resp>(`/api/v1/admin/tournaments/${id}`);
+    const derivedYear = deriveYearFrom({
+      name: String(t.name ?? t.title ?? ""),
+      start_date: t.start_date,
+      date: t.date,
+      year: t.year,
+    });
     return {
       id: String(t.id),
       title: String(t.name ?? t.title ?? "Tournament"),
-      description: String(t.description || ""),
-      date: String(t.date || ""),
-      teams: Number(t.teams || t.teams_count || 0),
-      venue: String(t.venue || ""),
-      status: (t.status || "Upcoming") as UITournament["status"],
+      description: String((t as Record<string, unknown>).description || ""),
+      date: t.start_date && t.end_date ? `${t.start_date} – ${t.end_date}` : String(t.date || ""),
+      year: derivedYear,
+      teams: Number((t as unknown as { teams?: number }).teams ?? t.teams_count ?? 0),
+      venue: String(t.venue || "PSTU Central Playground"),
+      status: normalizeTournamentStatus(t.status),
       statusColor: "",
       matches: Array.isArray(t.matches) ? (t.matches as Match[]) : [],
     };
@@ -169,10 +176,15 @@ export const fetchLeaderboards = async (): Promise<SeasonLeaderboards> => {
 };
 
 type TeamAPIResponse = {
-  id: string;
-  name: string;
+  id: string | number;
+  // backend may return either of these
+  name?: string;
   short_name?: string;
   players_count?: number;
+  // alternate keys
+  team_name?: string;
+  team_code?: string;
+  player_count?: number;
 };
 
 export const fetchTeamsByTournament = async (tournamentId: string): Promise<UITeamOverview[]> => {
@@ -182,12 +194,25 @@ export const fetchTeamsByTournament = async (tournamentId: string): Promise<UITe
       throw new Error(`Failed to fetch teams: ${response.statusText}`);
     }
     const data: TeamAPIResponse[] = await response.json();
-    return data.map((team) => ({
-      id: team.id,
-      name: team.name,
-      short: team.short_name || "",
-      players: team.players_count || 0,
+    const base = data.map((team) => ({
+      id: String(team.id),
+      name: String(team.name ?? team.team_name ?? ""),
+      short: String(team.short_name ?? team.team_code ?? ""),
+      players: Number(team.players_count ?? team.player_count ?? 0),
     }));
+    // Best-effort enrichment for player counts when missing/zero
+    const enriched = await Promise.all(
+      base.map(async (t) => {
+        if (t.players && t.players > 0) return t;
+        try {
+          const count = await getTeamPlayerCount(t.id);
+          return { ...t, players: Number(count || 0) };
+        } catch {
+          return t;
+        }
+      })
+    );
+    return enriched;
   } catch (error) {
     console.error("Error fetching teams by tournament:", error);
     return [];
@@ -214,32 +239,80 @@ type TournamentAPIResponse = {
   name: string;
   short_name?: string;
   status?: string;
-  date?: string;
+  date?: string; // legacy
+  start_date?: string;
+  end_date?: string;
+  year?: number | string;
 };
+
+function normalizeTournamentStatus(s: unknown): "Live" | "Upcoming" | "Completed" {
+  const key = String(s || "").toLowerCase();
+  if (key === "live" || key === "active") return "Live";
+  if (key === "upcoming") return "Upcoming";
+  if (key === "completed" || key === "past") return "Completed";
+  return "Upcoming";
+}
 
 export const fetchTournaments = async (): Promise<UITournament[]> => {
   try {
-    const response = await fetch(buildUrl("/api/v1/admin/tournaments/fetch"));
-    if (!response.ok) {
-      throw new Error(`Failed to fetch tournaments: ${response.statusText}`);
+    const raw = await apiFetchJson<unknown>(API_PATHS.listTournaments);
+    let arr: TournamentAPIResponse[] = [];
+    if (Array.isArray(raw)) {
+      arr = raw as TournamentAPIResponse[];
+    } else if (raw && typeof raw === 'object') {
+      const obj = raw as Record<string, unknown>;
+      if (Array.isArray(obj.data)) arr = obj.data as TournamentAPIResponse[];
+      else if (Array.isArray(obj.results)) arr = obj.results as TournamentAPIResponse[];
     }
-    const data: TournamentAPIResponse[] = await response.json();
-    return data.map((tournament) => ({
-      id: tournament.id,
-      title: tournament.name,
-      description: "", // Add description if available in API
-      date: tournament.date || "",
-      teams: 0, // Add teams count if available in API
-      venue: "", // Add venue if available in API
-      status: (tournament.status || "Upcoming") as "Live" | "Upcoming" | "Completed",
-      statusColor: "", // Add status color logic if needed
-      matches: [], // Add matches if available in API
-    }));
+    const base = arr.map((t) => {
+      const duration = t.start_date && t.end_date ? `${t.start_date} – ${t.end_date}` : (t.date || "");
+      const derivedYear = deriveYearFrom(t);
+      return {
+        id: String(t.id),
+        title: String(t.name ?? "Tournament"),
+        description: "",
+        date: duration,
+        year: derivedYear,
+        teams: 0,
+        venue: "PSTU Central Playground",
+        status: normalizeTournamentStatus(t.status),
+        statusColor: "",
+        matches: [] as Match[],
+      } as UITournament;
+    });
+    // Enrich with team counts (best-effort)
+    const withCounts = await Promise.all(
+      base.map(async (t) => {
+        try {
+          const teams = await fetchTeamsByTournament(t.id);
+          return { ...t, teams: teams.length };
+        } catch {
+          return t;
+        }
+      })
+    );
+    return withCounts;
   } catch (error) {
     console.error("Error fetching tournaments:", error);
     return [];
   }
 };
+
+// Helper to derive a year string from API fields
+function deriveYearFrom(t: { year?: string | number; start_date?: string; date?: string; name?: string }): string | undefined {
+  if (t.year !== undefined && t.year !== null && String(t.year).trim() !== "") return String(t.year);
+  const fromStart = (t.start_date || "").slice(0, 4);
+  if (/^\d{4}$/.test(fromStart)) return fromStart;
+  if (t.date) {
+    const m = String(t.date).match(/\d{4}/);
+    if (m) return m[0];
+  }
+  if (t.name) {
+    const m2 = String(t.name).match(/\d{4}/);
+    if (m2) return m2[0];
+  }
+  return undefined;
+}
 
 export type Standings = {
   seasonTitle: string;
@@ -265,6 +338,8 @@ export const API_PATHS = {
   // Player profile image
   uploadPlayerProfile: "/api/v1/upload/player/profile",
   getPlayerProfile: (filename: string) => `/api/v1/player/profile/${filename}`,
+  // Player profiles
+  playerProfiles: "/api/v1/player/profiles",
   // Player stats
   updateBattingInfo: (playerId: string | number) => `/api/v1/admin/update/batting/info/${playerId}`,
   // Admin players
@@ -361,6 +436,49 @@ export async function uploadPlayerProfileImage(file: File): Promise<unknown> {
 }
 export function playerProfileImageUrl(filename: string): string {
   return buildUrl(API_PATHS.getPlayerProfile(filename));
+}
+
+// Player profile(s)
+export type PlayerProfile = {
+  id: number;
+  name: string;
+  photo_url?: string | null;
+  category: string;
+  runs: number;
+  batting_strike_rate: number;
+  wickets: number;
+  bowling_strike_rate: number;
+  overs_bowled: number;
+  total_runs_conceded: number;
+};
+
+export async function getPlayerProfiles(): Promise<PlayerProfile | PlayerProfile[] | null> {
+  try {
+    return await apiFetchJson<PlayerProfile | PlayerProfile[]>(API_PATHS.playerProfiles);
+  } catch (_) {
+    return null;
+  }
+}
+
+export function extractFilename(pathLike: string): string {
+  // Handles values like "app/photo/player/abc.png" or just "abc.png"
+  const parts = String(pathLike).split("/");
+  return parts[parts.length - 1] || String(pathLike);
+}
+
+export function resolveProfileImageUrl(pathLike?: string | null): string | null {
+  if (!pathLike) return null;
+  if (/^https?:\/\//i.test(pathLike)) return pathLike;
+  const filename = extractFilename(pathLike);
+  return playerProfileImageUrl(filename);
+}
+
+export async function fetchCurrentPlayerProfile(): Promise<(PlayerProfile & { avatarUrl: string | null }) | null> {
+  const raw = await getPlayerProfiles();
+  if (!raw) return null;
+  const one = Array.isArray(raw) ? (raw[0] as PlayerProfile | undefined) : (raw as PlayerProfile);
+  if (!one) return null;
+  return { ...one, avatarUrl: resolveProfileImageUrl(one.photo_url ?? null) };
 }
 
 // Player statistics

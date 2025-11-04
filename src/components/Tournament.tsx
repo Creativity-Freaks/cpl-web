@@ -52,20 +52,21 @@ const Tournament = () => {
     );
   }
 
+  // Show only first 4 tournaments on the homepage
+  const visibleTournaments = tournaments.slice(0, 4);
+
   return (
     <section className="py-20 bg-background">
       <div className="container mx-auto px-4">
-        <div className="text-center mb-16 animate-fade-in-up">
-          <h2 className="text-4xl md:text-5xl font-bold text-foreground mb-4">
-            All <span className="text-accent">Tournaments</span>
-          </h2>
+        <div className="text-center mb-10 animate-fade-in-up">
+          <h2 className="text-4xl md:text-5xl font-bold text-foreground mb-4">ALL <span className="text-accent">Tournaments</span></h2>
           <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-            Explore all cricket tournaments. Stay updated and join the action!
+            Latest seasons at a glance. See more for the full list.
           </p>
         </div>
 
         <div className="grid lg:grid-cols-2 gap-8 mb-12">
-          {tournaments.map((tournament, index) => (
+          {visibleTournaments.map((tournament, index) => (
             <Card 
               key={tournament.id || index} 
               className="border-border hover:shadow-glow transition-all duration-300 hover:-translate-y-1 animate-scale-in overflow-hidden"
@@ -74,7 +75,7 @@ const Tournament = () => {
               <div className="h-2 bg-gradient-accent"></div>
               <CardHeader>
                 <div className="flex items-start justify-between mb-2">
-                  <CardTitle className="text-2xl">{tournament.title}</CardTitle>
+                  <CardTitle className="text-2xl">{tournament.title} {tournament.year ? `(${tournament.year})` : ''}</CardTitle>
                   <span className={`${tournament.statusColor || 'bg-accent'} text-white px-3 py-1 rounded-full text-xs font-medium`}>
                     {tournament.status || 'Upcoming'}
                   </span>
@@ -105,6 +106,16 @@ const Tournament = () => {
               </CardContent>
             </Card>
           ))}
+        </div>
+
+        {/* See more link moved to bottom */}
+        <div className="mt-2 mb-14 text-center">
+          <Link to="/tournament">
+            <Button variant="outline" className="border-2">
+              See more
+              <ArrowRight className="ml-2 h-4 w-4" />
+            </Button>
+          </Link>
         </div>
 
         {/* Featured Image */}
