@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { X, ChevronDown, Check, DollarSign } from 'lucide-react';
 
 // --- CONFIG ---
@@ -142,6 +142,7 @@ interface AdminPlayerUpdateInfoProps {
 export const AdminPlayerUpdateInfo: React.FC<AdminPlayerUpdateInfoProps> = ({ player, auctionPlayerId: propAuctionPlayerId, onClose, onUpdate }) => {
   const [updating, setUpdating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const bcRef = useRef<BroadcastChannel | null>(null);
 
   // Determine auctionPlayerId: Prefer prop, fallback to player.auction_player_id or player.id
   const auctionPlayerId = propAuctionPlayerId || player?.auction_player_id || player?.id;
@@ -153,6 +154,26 @@ export const AdminPlayerUpdateInfo: React.FC<AdminPlayerUpdateInfoProps> = ({ pl
     base_price: '',
     start_players: '',
   });
+
+  // Setup broadcast channel for cross-tab communication
+  useEffect(() => {
+    try {
+      bcRef.current = new BroadcastChannel('auction-updates');
+      // Listen for refresh requests - form doesn't need to refresh, but we can listen for updates
+      bcRef.current.onmessage = (ev: MessageEvent) => {
+        const data = ev.data;
+        // If player data is updated elsewhere, we could refresh here silently
+        // But for a form, we typically don't auto-refresh to avoid losing user input
+      };
+    } catch {}
+    return () => {
+      try {
+        if (bcRef.current) {
+          bcRef.current.close();
+        }
+      } catch {}
+    };
+  }, []);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement> | { target: { name: string; value: string } }) => {
     let name: string;
@@ -190,6 +211,11 @@ export const AdminPlayerUpdateInfo: React.FC<AdminPlayerUpdateInfoProps> = ({ pl
       };
       console.log('Debug - Sending data:', dataToSend, 'to ID:', auctionPlayerId);  // Log payload
       await api.put(`/api/v1/admin/auction/prepared-player/${auctionPlayerId}`, dataToSend);
+      
+      // Broadcast refresh to other tabs/windows
+      try {
+        bcRef.current?.postMessage({ type: 'refresh', section: 'auction-players' });
+      } catch {}
       
       // Success: Notify parent
       const updatedData = { ...formData, auction_player_id: auctionPlayerId };
@@ -310,7 +336,7 @@ export const AdminPlayerUpdateInfo: React.FC<AdminPlayerUpdateInfoProps> = ({ pl
                     Preparing...
                   </>
                 ) : (
-                  'Prepare & Update'
+                  'Preview and Update'
                 )}
               </Button>
               <Button variant="secondary" size="lg" className="flex-1" onClick={onClose}>
