@@ -123,43 +123,43 @@ useEffect(() => {
 try { if (activeSection) localStorage.setItem('admin_active_section', activeSection); } catch {}
 }, [activeSection]);
 // --- FETCH TOURNAMENTS ---
-const fetchTournaments = async () => {
+const fetchTournaments = async (silent = false) => {
 try {
-setLoadingTournaments(true);
+if (!silent) setLoadingTournaments(true);
 const data = await api.get("/api/v1/admin/tournaments/fetch");
 setTournaments(Array.isArray(data) ? data : []);
 } catch (error: any) {
-toast.error("Tournament load failed: " + error.message);
+if (!silent) toast.error("Tournament load failed: " + error.message);
 } finally {
-setLoadingTournaments(false);
+if (!silent) setLoadingTournaments(false);
 }
 };
 // --- FETCH TEAMS ---
-const fetchTeams = async (tournamentId: number) => {
+const fetchTeams = async (tournamentId: number, silent = false) => {
 if (!tournamentId) return;
 try {
-setLoadingTeams(true);
+if (!silent) setLoadingTeams(true);
 const data = await api.get(`/api/v1/admin/tournaments/${tournamentId}/teams`);
 setTeams(Array.isArray(data) ? data : []);
 } catch (error: any) {
-toast.error("Team load failed: " + error.message);
+if (!silent) toast.error("Team load failed: " + error.message);
 setTeams([]);
 } finally {
-setLoadingTeams(false);
+if (!silent) setLoadingTeams(false);
 }
 };
 // --- FETCH MATCHES ---
-const fetchMatches = async (tournamentId: number) => {
+const fetchMatches = async (tournamentId: number, silent = false) => {
 if (!tournamentId) return;
 try {
-setLoadingMatches(true);
+if (!silent) setLoadingMatches(true);
 const data = await api.get(`/api/v1/admin/tournaments/${tournamentId}/matches`);
 setMatches(Array.isArray(data) ? data : []);
 } catch (error: any) {
-toast.error("Match load failed: " + error.message);
+if (!silent) toast.error("Match load failed: " + error.message);
 setMatches([]);
 } finally {
-setLoadingMatches(false);
+if (!silent) setLoadingMatches(false);
 }
 };
 // --- FETCH RAW CONFIRMED AUCTION PLAYERS ---
@@ -174,7 +174,7 @@ return [];
 }
 };
 // --- LOAD AUCTION DATA (ALL + CONFIRMED, FILTER AVAILABLE, MERGE FULL DETAILS) ---
-const loadAuctionData = async () => {
+const loadAuctionData = async (silent = false) => {
 if (!auctionTournamentId) {
 setAllPlayers([]);
 setDisplayedPlayers([]);
@@ -185,7 +185,7 @@ setUpdatedPlayers([]);
 setLoadingAuctionPlayers(false);
 return;
 }
-setLoadingAuctionPlayers(true);
+if (!silent) setLoadingAuctionPlayers(true);
 let allPlayersList: any[] = [];
 try {
   // Fetch all players (full details)
@@ -228,16 +228,16 @@ try {
   setUpdatedPlayers([]);
   setPendingSelectedPlayers([]);
 } finally {
-  setLoadingAuctionPlayers(false);
+  if (!silent) setLoadingAuctionPlayers(false);
 }
 };
 // --- FETCH LIVE PLAYERS ---
-const fetchLivePlayers = async () => {
+const fetchLivePlayers = async (silent = false) => {
   if (!auctionTournamentId) {
     setLivePlayers([]);
     return;
   }
-  setLoadingLivePlayers(true);
+  if (!silent) setLoadingLivePlayers(true);
   try {
     // Fetch raw auction players
     const auctionData = await api.get(`/api/v1/admin/auction/tournaments/${auctionTournamentId}/players`);
@@ -268,7 +268,7 @@ const fetchLivePlayers = async () => {
   } catch {
     setLivePlayers([]);
   } finally {
-    setLoadingLivePlayers(false);
+    if (!silent) setLoadingLivePlayers(false);
   }
 };
 // --- HANDLE SCROLL TO LOAD MORE (5 at a time) ---
@@ -344,6 +344,8 @@ try {
   toast.success(`${numAdded} players added to auction!`);
   // Refresh live players immediately
   await fetchLivePlayers();
+  // Broadcast refresh to other tabs
+  try { bcRef.current?.postMessage({ type: 'refresh', section: 'auction' }); } catch {}
 } catch (error: any) {
   console.error("❌ API Error Details:", error);
   toast.error(`Failed: ${error.message}`);
@@ -364,6 +366,8 @@ try {
   await loadAuctionData();
   // Also refresh live players
   await fetchLivePlayers();
+  // Broadcast refresh to other tabs
+  try { bcRef.current?.postMessage({ type: 'refresh', section: 'auction-players' }); } catch {}
 } catch (error: any) {
   toast.error("Remove failed: " + error.message);
 }
@@ -383,6 +387,8 @@ try {
   setNewTeam({ name: '', code: '' });
   toast.success("Team created!");
   if (selectedTournamentId === createTeamTournamentId) fetchTeams(createTeamTournamentId);
+  // Broadcast refresh to other tabs
+  try { bcRef.current?.postMessage({ type: 'refresh', section: 'team' }); } catch {}
 } catch (error: any) {
   toast.error("Team create failed: " + error.message);
 }
@@ -408,6 +414,8 @@ try {
   setNewMatch({ homeTeamId: '', awayTeamId: '', date: null, venue: '' });
   toast.success("Match created!");
   fetchMatches(selectedMatchTournamentId);
+  // Broadcast refresh to other tabs
+  try { bcRef.current?.postMessage({ type: 'refresh', section: 'match' }); } catch {}
 } catch (error: any) {
   toast.error("Match create failed: " + error.message);
 }
@@ -442,6 +450,8 @@ try {
   setNewTournament({ name: '', year: '', startDate: null, endDate: null });
   toast.success("Tournament created!");
   fetchTournaments();
+  // Broadcast refresh to other tabs
+  try { bcRef.current?.postMessage({ type: 'refresh', section: 'tournaments' }); } catch {}
 } catch (error: any) {
   toast.error("Create error: " + error.message);
 }
@@ -537,9 +547,40 @@ useEffect(() => {
 useEffect(() => {
   try {
     bcRef.current = new BroadcastChannel('auction-updates');
+    // Listen for refresh requests from other tabs
+    bcRef.current.onmessage = (ev: MessageEvent) => {
+      const data = ev.data;
+      if (data && data.type === 'refresh') {
+        // Silently refresh data based on active section (pass true for silent mode)
+        if (data.section === 'tournaments' || !data.section) {
+          fetchTournaments(true);
+        }
+        if (data.section === 'team' || !data.section) {
+          if (selectedTournamentId) fetchTeams(selectedTournamentId, true);
+        }
+        if (data.section === 'match' || !data.section) {
+          if (selectedMatchTournamentId) {
+            fetchTeams(selectedMatchTournamentId, true);
+            fetchMatches(selectedMatchTournamentId, true);
+          }
+        }
+        if (data.section === 'auction' || data.section === 'auction-players' || !data.section) {
+          if (auctionTournamentId) {
+            loadAuctionData(true);
+            fetchLivePlayers(true);
+          }
+        }
+        if (data.section === 'live-auction' || !data.section) {
+          if (auctionTournamentId) {
+            fetchLivePlayers(true);
+            fetchTeams(auctionTournamentId, true);
+          }
+        }
+      }
+    };
   } catch {}
   return () => { try { bcRef.current && bcRef.current.close(); } catch {} };
-}, []);
+}, [selectedTournamentId, selectedMatchTournamentId, auctionTournamentId]);
 // Load teams' stats for the selected tournament and map to team.id
 useEffect(() => {
   (async () => {
@@ -562,6 +603,61 @@ useEffect(() => {
     }
   })();
 }, [auctionTournamentId]);
+
+// Automatic background refresh for all sections
+// Refresh every 5 seconds when section is active, but don't show loading states
+useEffect(() => {
+  if (!isAuthenticated) return;
+  
+  const refreshInterval = setInterval(() => {
+    // Silently refresh based on active section (pass true for silent mode)
+    switch (activeSection) {
+      case 'tournaments':
+        // Refresh tournaments silently
+        fetchTournaments(true).catch(() => {});
+        break;
+      case 'team':
+        if (selectedTournamentId) {
+          fetchTeams(selectedTournamentId, true).catch(() => {});
+        }
+        break;
+      case 'match':
+        if (selectedMatchTournamentId) {
+          fetchMatches(selectedMatchTournamentId, true).catch(() => {});
+          fetchTeams(selectedMatchTournamentId, true).catch(() => {});
+        }
+        break;
+      case 'auction':
+      case 'auction-players':
+        if (auctionTournamentId) {
+          loadAuctionData(true).catch(() => {});
+        }
+        break;
+      case 'live-auction':
+        if (auctionTournamentId) {
+          fetchLivePlayers(true).catch(() => {});
+          // Refresh team stats silently
+          (async () => {
+            try {
+              const list = await api.get(`/api/v1/admin/dashboard/teams/${auctionTournamentId}/player-distribution`);
+              if (Array.isArray(list)) {
+                const map: Record<string, any> = {};
+                list.forEach((item: any) => {
+                  const normalized = normalizeTeamStats(item);
+                  const key = String(item.team_id || item.id || '');
+                  if (key) map[key] = normalized;
+                });
+                setAllTeamsStatsMap(prev => ({ ...prev, ...map }));
+              }
+            } catch {}
+          })();
+        }
+        break;
+    }
+  }, 5000); // Refresh every 5 seconds
+  
+  return () => clearInterval(refreshInterval);
+}, [activeSection, isAuthenticated, selectedTournamentId, selectedMatchTournamentId, auctionTournamentId]);
 // Helpers for Live Auction rendering
 // Robust category normalizer to ensure strict matching with UI filter
 const normalizeCategory = (value: any): string => {
@@ -626,28 +722,9 @@ const SECTION_LABELS: Record<string, string> = {
   'J': 'Titanium-II',
 };
 
-// Mapping from start_players values to section letters
-// Based on admin_player_update_info.tsx: 'A'=STAR, 'B'=Diamond-1, 'C'=Diamond-2, etc.
-// Sections: A=Diamond, B=Platinum, C=Gold-I, D=Gold-II, E=Silver-I, F=Silver-II, G=Bronze-I, H=Bronze-II, I=Titanium-I, J=Titanium-II
-const START_POS_TO_SECTION_LETTER: Record<string, string> = {
-  'A': 'STAR',      // STAR category only (special case)
-  'B': 'A',         // Diamond-1 -> Diamond section (A)
-  'C': 'A',         // Diamond-2 -> Diamond section (A)
-  'D': 'B',         // Platinum-1 -> Platinum section (B)
-  'E': 'B',         // Platinum-2 -> Platinum section (B)
-  'F': 'C',         // Gold-1 -> Gold-I section (C)
-  'G': 'D',         // Gold-2 -> Gold-II section (D)
-  'H': 'E',         // Silver-1 -> Silver-I section (E)
-  'I': 'F',         // Silver-2 -> Silver-II section (F)
-  'J': 'G',         // Bronze-1 -> Bronze-I section (G)
-  'K': 'H',         // Bronze-2 -> Bronze-II section (H)
-  'L': 'I',         // Titanium-1 -> Titanium-I section (I)
-  'M': 'J',         // Titanium-2 -> Titanium-II section (J)
-};
-
 // Build sections A..J with 5 players per section, ordered by highest base price
 // Special handling for STAR category: shows only one section with 5 players
-// Players are filtered by both category AND start_players to ensure they only appear in correct category
+// For other categories: Players are distributed into sections based purely on base_price ranking
 const getSectionedPlayers = (categoryLabel: string) => {
   const perSection = 5;
   const toBasePrice = (p: any) => Number(p.base_price ?? p.basePrice ?? 0) || 0;
@@ -655,7 +732,6 @@ const getSectionedPlayers = (categoryLabel: string) => {
   // Special handling for STAR category
   if (categoryLabel === 'STAR') {
     // Filter players by start_players = 'A' (STAR position) only
-    // Exclude players with other start_players values
     const starPlayers = livePlayers
       .filter((p: any) => {
         const startPos = String(p.start_players || '').trim().toUpperCase();
@@ -672,43 +748,31 @@ const getSectionedPlayers = (categoryLabel: string) => {
   }
   
   // For other categories: Batter, Bowler, All-rounder, WK Batsman
-  // Filter by: 1) category matches, 2) start_players is NOT 'A' (STAR players excluded)
+  // Filter by category and sort by base_price (highest first)
+  const categoryFiltered = livePlayers
+    .filter((p: any) => {
+      const playerCategory = getPlayerCategory(p);
+      return playerCategory === normalizeCategory(categoryLabel);
+    })
+    .sort((a: any, b: any) => toBasePrice(b) - toBasePrice(a)); // Sort by base_price descending
+  
+  // Distribute players into sections based on base_price ranking
+  // Top 5 → Diamond, Next 5 → Platinum, etc.
   const lettersAZ = Array.from({ length: 10 }, (_, i) => String.fromCharCode(65 + i)); // A..J
-  
-  // First, filter by category and exclude STAR players (start_players = 'A')
-  const categoryFiltered = livePlayers.filter((p: any) => {
-    const playerCategory = getPlayerCategory(p);
-    const matchesCategory = playerCategory === normalizeCategory(categoryLabel);
-    const startPos = String(p.start_players || '').trim().toUpperCase();
-    const isNotStar = startPos !== 'A' && startPos !== 'STAR';
-    return matchesCategory && isNotStar;
-  });
-  
-  // Group players by their start_players and map to sections
   const sections: { key: string; label: string; players: any[] }[] = [];
   
-  // For each section letter (A-J), find players whose start_players maps to that section
-  lettersAZ.forEach((letter) => {
-    // Find all start_players values that map to this section letter
-    const matchingStartPositions = Object.keys(START_POS_TO_SECTION_LETTER)
-      .filter(sp => START_POS_TO_SECTION_LETTER[sp] === letter);
-    
-    // Get players with matching start_players
-    const sectionPlayers = categoryFiltered
-      .filter((p: any) => {
-        const startPos = String(p.start_players || '').trim().toUpperCase();
-        return matchingStartPositions.includes(startPos);
-      })
-      .sort((a: any, b: any) => toBasePrice(b) - toBasePrice(a));
+  for (let i = 0; i < categoryFiltered.length && sections.length < lettersAZ.length; i += perSection) {
+    const letter = lettersAZ[sections.length];
+    const sectionPlayers = categoryFiltered.slice(i, i + perSection);
     
     if (sectionPlayers.length > 0) {
       sections.push({
         key: letter,
         label: SECTION_LABELS[letter] || `Section ${letter}`,
-        players: sectionPlayers.slice(0, perSection), // Limit to 5 per section
+        players: sectionPlayers,
       });
     }
-  });
+  }
   
   return sections;
 };
@@ -1248,15 +1312,53 @@ toast.success("Logged out");
                     className="w-full mt-4"
                     onClick={() => {
                       if (!lastClickedPlayer) { toast.error('Open a player first.'); return; }
-                      const amount = parseLiveAmount();
-                      const record = { type: 'bid', playerId: lastClickedPlayer.id, amount, timestamp: Date.now() };
-                      // Persist bid for refresh safety
+                      const newBidAmount = parseLiveAmount();
+                      if (newBidAmount <= 0) {
+                        toast.error('Bid amount must be greater than 0');
+                        return;
+                      }
+                      
+                      // Get current total price (base_price + previous bids)
+                      const lp = livePlayers.find((x:any)=> String(x.id) === String(lastClickedPlayer.id));
+                      const basePrice = Number(lp?.base_price ?? lp?.basePrice ?? (lastClickedPlayer as any)?.base_price ?? 0) || 0;
+                      
+                      // Get previous total price from localStorage or calculate from current bid
+                      let previousTotalPrice = basePrice;
                       try {
-                        localStorage.setItem(`bid_${record.playerId}`, String(amount));
+                        const previousBid = Number(localStorage.getItem(`bid_${lastClickedPlayer.id}`) || '0');
+                        if (previousBid > 0) {
+                          // Get previous total from localStorage if exists
+                          const previousTotal = localStorage.getItem(`total_${lastClickedPlayer.id}`);
+                          if (previousTotal) {
+                            previousTotalPrice = Number(previousTotal) || basePrice;
+                          } else {
+                            // If no previous total, calculate: base + previous bid
+                            previousTotalPrice = basePrice + previousBid;
+                          }
+                        }
                       } catch {}
+                      
+                      // New total = previous total + new bid amount
+                      const newTotalPrice = previousTotalPrice + newBidAmount;
+                      
+                      // Store the new bid amount and new total price
+                      const record = { 
+                        type: 'bid', 
+                        playerId: lastClickedPlayer.id, 
+                        amount: newBidAmount,
+                        totalPrice: newTotalPrice,
+                        timestamp: Date.now() 
+                      };
+                      
+                      // Persist bid and total for refresh safety
+                      try {
+                        localStorage.setItem(`bid_${record.playerId}`, String(newBidAmount));
+                        localStorage.setItem(`total_${record.playerId}`, String(newTotalPrice));
+                      } catch {}
+                      
                       // Broadcast to other tabs (admin_player_image listens)
                       try { bcRef.current?.postMessage(record); } catch {}
-                      toast.success('Bid placed');
+                      toast.success(`Bid placed: ৳${newBidAmount}. New total: ৳${newTotalPrice}`);
                     }}
                   >
                     Place Bid
@@ -1287,7 +1389,9 @@ toast.success("Logged out");
                             className="text-green-700 border-green-300 hover:bg-green-50"
                             onClick={async () => {
                               if (!lastClickedPlayer) { toast.error('Open a player first.'); return; }
-                              // Helper to resolve auction_player_id
+                              // Helper to resolve auction_player_id from first image endpoint
+                              // First image endpoint: /api/v1/admin/auction/tournaments/{tournament_id}/players
+                              // Returns players with "id" field which is the auction_player_id
                               const resolveAuctionPlayerId = async (): Promise<{ id: number | null; alreadyAssignedTeamId?: number | null }> => {
                                 const fromClicked = (lastClickedPlayer as any)?.auction_player_id;
                                 if (fromClicked) return { id: Number(fromClicked) };
@@ -1296,25 +1400,43 @@ toast.success("Logged out");
                                 if (localId) return { id: Number(localId) };
                                 if (!auctionTournamentId) return null;
                                 try {
+                                  // Fetch from first image endpoint to get auction_player_id (the "id" field)
                                   const list = await api.get(`/api/v1/admin/auction/tournaments/${auctionTournamentId}/players`);
                                   if (Array.isArray(list)) {
+                                    // Find player by player_id to get the auction_player_id (which is the "id" field in response)
                                     const found = list.find((it:any) => String(it.player_id ?? it.id) === String(lastClickedPlayer.id));
-                                    const id = found?.auction_player_id || found?.id;
+                                    // The "id" field in the response is the auction_player_id we need
+                                    const auctionPlayerId = found?.id; // This is the auction_player_id from first endpoint
                                     const assigned = Number(found?.sold_to_team_id || 0) || null;
-                                    return id ? { id: Number(id), alreadyAssignedTeamId: assigned } : { id: null };
+                                    return auctionPlayerId ? { id: Number(auctionPlayerId), alreadyAssignedTeamId: assigned } : { id: null };
                                   }
                                 } catch {}
                                 return { id: null };
                               };
                               const resolved = await resolveAuctionPlayerId();
                               const auctionPlayerId = resolved?.id || null;
-                              if (!auctionPlayerId) { toast.error('auction_player_id not found.'); return; }
-                              // compute sold price = base + bid
+                              if (!auctionPlayerId) { toast.error('auction_player_id not found. Please ensure player is selected for auction.'); return; }
+                              // compute sold price = base + all cumulative bids
                               const lp = livePlayers.find((x:any)=> String(x.id) === String(lastClickedPlayer.id));
                               const baseFromList = Number(lp?.base_price ?? lp?.basePrice ?? 0) || 0;
                               const baseFromState = Number((lastClickedPlayer as any)?.base_price ?? 0) || 0;
                               const base = baseFromState || baseFromList;
-                              const totalPrice = base + parseLiveAmount();
+                              
+                              // Get current total price (which includes all cumulative bids)
+                              let totalPrice = base;
+                              try {
+                                const storedTotal = localStorage.getItem(`total_${lastClickedPlayer.id}`);
+                                if (storedTotal) {
+                                  totalPrice = Number(storedTotal) || base;
+                                } else {
+                                  // Fallback: calculate from current bid
+                                  const currentBid = parseLiveAmount();
+                                  totalPrice = base + currentBid;
+                                }
+                              } catch {
+                                const currentBid = parseLiveAmount();
+                                totalPrice = base + currentBid;
+                              }
                               try {
                                 // Prevent duplicate assignment: if already assigned, skip PUT
                                 let alreadyAssigned = false;
@@ -1332,17 +1454,20 @@ toast.success("Logged out");
                                 } catch {}
 
                                 if (!alreadyAssigned) {
-                                  // Try number payload first
+                                  // Use third image endpoint: PUT /api/v1/admin/auction/assign-player/{auction_player_id}
+                                  // auction_player_id comes from first image endpoint (the "id" field)
+                                  // sold_to_team_id comes from second image endpoint (team "id" field)
+                                  // sold_price is the total price (base + cumulative bids)
                                   try {
                                     await api.put(`/api/v1/admin/auction/assign-player/${auctionPlayerId}`, {
                                       sold_price: Number(totalPrice),
-                                      sold_to_team_id: Number(team.id),
+                                      sold_to_team_id: Number(team.id), // team.id from second image endpoint
                                     });
                                   } catch (e:any) {
                                     // Retry with string price if server rejects
                                     await api.put(`/api/v1/admin/auction/assign-player/${auctionPlayerId}`, {
                                       sold_price: String(totalPrice),
-                                      sold_to_team_id: Number(team.id),
+                                      sold_to_team_id: Number(team.id), // team.id from second image endpoint
                                     });
                                   }
                                 }
@@ -1363,6 +1488,44 @@ toast.success("Logged out");
                                   localStorage.setItem(key, JSON.stringify(next));
                                 } catch {}
                                 try { bcRef.current?.postMessage(record); } catch {}
+                                
+                                // Update team stats: decrease coins and increase player count
+                                setAllTeamsStatsMap(prev => {
+                                  const copy = { ...prev };
+                                  const teamKey = String(team.id);
+                                  const currentStats = copy[teamKey] || {};
+                                  const currentCoins = Number(currentStats.teamCoins || currentStats.totalCoins || 0);
+                                  const currentPlayers = Number(currentStats.playerCount || 0);
+                                  
+                                  copy[teamKey] = {
+                                    ...currentStats,
+                                    teamCoins: Math.max(0, currentCoins - totalPrice),
+                                    totalCoins: currentStats.totalCoins || currentCoins,
+                                    playerCount: currentPlayers + 1,
+                                    maxCount: currentStats.maxCount || 30,
+                                    available: Math.max(0, (currentStats.maxCount || 30) - (currentPlayers + 1)),
+                                  };
+                                  return copy;
+                                });
+                                
+                                // Refresh team stats from API to get updated server data
+                                if (auctionTournamentId) {
+                                  (async () => {
+                                    try {
+                                      const list = await api.get(`/api/v1/admin/dashboard/teams/${auctionTournamentId}/player-distribution`);
+                                      if (Array.isArray(list)) {
+                                        const map: Record<string, any> = {};
+                                        list.forEach((item: any) => {
+                                          const normalized = normalizeTeamStats(item);
+                                          const key = String(item.team_id || item.id || '');
+                                          if (key) map[key] = normalized;
+                                        });
+                                        setAllTeamsStatsMap(map);
+                                      }
+                                    } catch {}
+                                  })();
+                                }
+                                
                                 toast.success(`Assigned and added to Sold: ${teamName}`);
                                 // Remove the player from section list after assignment
                                 setLivePlayers(prev => prev.filter((x:any) => String(x.id) !== String(lastClickedPlayer.id)));
@@ -1614,19 +1777,67 @@ toast.success("Logged out");
         setSelectedUpdatePlayer(null);
         if (auctionTournamentId) loadAuctionData();
       }}
-      onUpdate={(updatedData: any) => {
-        // Immediately reflect in Updated Players list
-        setUpdatedPlayers(prev => {
-          const id = updatedData?.auction_player_id || selectedUpdatePlayer?.auction_player_id || selectedUpdatePlayer?.id;
-          const merged = { ...(selectedUpdatePlayer || {}), ...(updatedData || {}) };
-          const idx = prev.findIndex(p => (p.auction_player_id || p.id) === id);
-          if (idx >= 0) {
-            const copy = [...prev];
-            copy[idx] = { ...copy[idx], ...merged };
-            return copy;
+      onUpdate={async (updatedData: any) => {
+        // After update, refresh from API endpoint to get latest data
+        if (auctionTournamentId) {
+          try {
+            // Refresh auction players from the GET endpoint
+            const refreshedPlayers = await fetchConfirmedAuctionPlayers(auctionTournamentId);
+            
+            // Fetch all players for full details
+            const allData = await api.get("/api/v1/adminall/players");
+            const allPlayersList = Array.isArray(allData) ? allData : [];
+            
+            // Merge full details for confirmed players
+            const fullConfirmed = refreshedPlayers.map((c: any) => {
+              const fullP = allPlayersList.find((p: any) => p.id === (c.player_id || c.id));
+              if (fullP) {
+                return {
+                  ...fullP,
+                  auction_player_id: c.auction_player_id || c.id,
+                  start_players: c.start_players,
+                  base_price: c.base_price,
+                };
+              }
+              return { ...c, name: c.player_name };
+            });
+            
+            // Update confirmed players list
+            setConfirmedAuctionPlayers(fullConfirmed);
+            setDisplayedConfirmedPlayers(fullConfirmed.slice(0, visibleCountConfirmed));
+            
+            // Filter updated players: only those with both base_price and start_players set
+            const updated = fullConfirmed.filter((p: any) => 
+              p.start_players && 
+              p.base_price && 
+              p.start_players !== '' && 
+              p.base_price !== 0 &&
+              Number(p.base_price) > 0
+            );
+            setUpdatedPlayers(updated);
+            
+            toast.success("Player updated successfully!");
+          } catch (error: any) {
+            console.error("Failed to refresh after update:", error);
+            toast.error("Update saved but failed to refresh list");
+            // Fallback: try to update local state
+            const id = updatedData?.auction_player_id || selectedUpdatePlayer?.auction_player_id || selectedUpdatePlayer?.id;
+            const merged = { ...(selectedUpdatePlayer || {}), ...(updatedData || {}) };
+            setUpdatedPlayers(prev => {
+              const idx = prev.findIndex(p => (p.auction_player_id || p.id) === id);
+              if (idx >= 0) {
+                const copy = [...prev];
+                copy[idx] = { ...copy[idx], ...merged };
+                return copy;
+              }
+              // Only add if both base_price and start_players are set
+              if (merged.base_price && merged.start_players && merged.base_price !== 0) {
+                return [...prev, merged];
+              }
+              return prev;
+            });
           }
-          return [...prev, merged];
-        });
+        }
       }}
     />
   )}

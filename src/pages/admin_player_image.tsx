@@ -58,8 +58,10 @@ export const AdminPlayerImage: React.FC<AdminPlayerImageProps> = ({ player, onCl
   const [soldList, setSoldList] = useState<any[]>([]);
   const playerId = String((livePlayer as any).id || new URLSearchParams(window.location.search).get('player_id') || '').trim();
 
-  // Fetch all sold players for the tournament
-  const fetchAllSoldPlayers = useCallback(async () => {
+  // Fetch all sold players for the tournament from second image endpoint
+  // Second image endpoint: /api/v1/admin/tournaments/{tournament_id}/teams
+  // This endpoint returns teams with players array, showing which players are sold to which teams
+  const fetchAllSoldPlayers = useCallback(async (silent = false) => {
     if (!tournamentId) return;
     try {
       const token = localStorage.getItem("auth_token");
@@ -70,48 +72,85 @@ export const AdminPlayerImage: React.FC<AdminPlayerImageProps> = ({ player, onCl
         headers["Authorization"] = `Bearer ${token}`;
       }
       
-      // Fetch auction players to get sold ones
-      const response = await fetch(buildUrl(`/api/v1/admin/auction/tournaments/${tournamentId}/players`), {
+      // Fetch from second image endpoint: /api/v1/admin/tournaments/{tournament_id}/teams
+      // This endpoint shows teams with their players array, indicating sold players
+      const teamsResponse = await fetch(buildUrl(`/api/v1/admin/tournaments/${tournamentId}/teams`), {
         headers,
       });
-      if (response.ok) {
-        const auctionPlayers = await response.json();
-        if (Array.isArray(auctionPlayers)) {
-          // Filter only sold players (those with sold_to_team_id)
-          const soldPlayers = auctionPlayers
-            .filter((p: any) => p.sold_to_team_id && p.sold_price)
-            .map((p: any) => ({
-              playerId: p.player_id || p.id,
-              playerName: p.player_name || p.name || 'Unknown',
-              teamId: p.sold_to_team_id,
-              teamName: 'Team ' + p.sold_to_team_id, // Will try to fetch team name
-              amount: p.sold_price || 0,
-            }));
+      
+      if (teamsResponse.ok) {
+        const teams = await teamsResponse.json();
+        if (Array.isArray(teams)) {
+          // Extract all sold players from all teams
+          const allSoldPlayers: any[] = [];
           
-          // Fetch teams to get team names
+          teams.forEach((team: any) => {
+            const teamId = team.id;
+            const teamName = team.team_name || team.name || 'Unknown Team';
+            
+            // If team has players array, those are the sold players for this team
+            if (Array.isArray(team.players)) {
+              team.players.forEach((player: any) => {
+                allSoldPlayers.push({
+                  playerId: player.id || player.player_id,
+                  playerName: player.name || player.player_name || 'Unknown Player',
+                  teamId: teamId,
+                  teamName: teamName,
+                  amount: 0, // Will fetch from first endpoint if needed
+                  timestamp: Date.now(),
+                });
+              });
+            }
+          });
+          
+          // Also fetch from first endpoint to get sold_price information
           try {
-            const teamsResponse = await fetch(buildUrl(`/api/v1/admin/tournaments/${tournamentId}/teams`), {
+            const playersResponse = await fetch(buildUrl(`/api/v1/admin/auction/tournaments/${tournamentId}/players`), {
               headers,
             });
-            if (teamsResponse.ok) {
-              const teams = await teamsResponse.json();
-              if (Array.isArray(teams)) {
-                const teamMap = new Map(teams.map((t: any) => [t.id, t.team_name || t.name || 'Unknown Team']));
-                const soldWithTeamNames = soldPlayers.map((s: any) => ({
-                  ...s,
-                  teamName: teamMap.get(s.teamId) || s.teamName,
-                }));
-                setSoldList(soldWithTeamNames);
+            if (playersResponse.ok) {
+              const auctionPlayers = await playersResponse.json();
+              if (Array.isArray(auctionPlayers)) {
+                // Merge sold_price information
+                const soldWithPrice = allSoldPlayers.map((sold: any) => {
+                  const auctionPlayer = auctionPlayers.find((ap: any) => 
+                    String(ap.player_id || ap.id) === String(sold.playerId)
+                  );
+                  return {
+                    ...sold,
+                    amount: auctionPlayer?.sold_price || 0,
+                  };
+                });
+                
+                // Sort: current player at top, then by timestamp (newest first)
+                const currentPlayerId = String((livePlayer as any).id || playerId || '').trim();
+                const sorted = soldWithPrice.sort((a: any, b: any) => {
+                  // Current player first
+                  if (String(a.playerId) === currentPlayerId) return -1;
+                  if (String(b.playerId) === currentPlayerId) return 1;
+                  // Then by timestamp (newest first)
+                  return (b.timestamp || 0) - (a.timestamp || 0);
+                });
+                
+                setSoldList(sorted);
                 return;
               }
             }
           } catch {}
           
-          setSoldList(soldPlayers);
+          // If first endpoint fails, still show the list from second endpoint
+          const currentPlayerId = String((livePlayer as any).id || playerId || '').trim();
+          const sorted = allSoldPlayers.sort((a: any, b: any) => {
+            if (String(a.playerId) === currentPlayerId) return -1;
+            if (String(b.playerId) === currentPlayerId) return 1;
+            return (b.timestamp || 0) - (a.timestamp || 0);
+          });
+          setSoldList(sorted);
+          return;
         }
       }
     } catch (error) {
-      console.error('Failed to fetch sold players:', error);
+      if (!silent) console.error('Failed to fetch sold players:', error);
       // Fallback to localStorage
       try {
         const allSold: any[] = [];
@@ -126,10 +165,17 @@ export const AdminPlayerImage: React.FC<AdminPlayerImageProps> = ({ player, onCl
             } catch {}
           }
         }
-        setSoldList(allSold);
+        // Sort by current player first
+        const currentPlayerId = String((livePlayer as any).id || playerId || '').trim();
+        const sorted = allSold.sort((a: any, b: any) => {
+          if (String(a.playerId) === currentPlayerId) return -1;
+          if (String(b.playerId) === currentPlayerId) return 1;
+          return (b.timestamp || 0) - (a.timestamp || 0);
+        });
+        setSoldList(sorted);
       } catch {}
     }
-  }, [tournamentId]);
+  }, [tournamentId, livePlayer, playerId]);
 
   // Load existing from localStorage and fetch from API
   useEffect(() => {
@@ -178,8 +224,9 @@ export const AdminPlayerImage: React.FC<AdminPlayerImageProps> = ({ player, onCl
         }
         // Handle sold player - refresh sold list
         if (data && data.type === 'sold') {
-          // Refresh all sold players from API
-          fetchAllSoldPlayers();
+          // Refresh all sold players from API silently
+          // This will show the newly sold player in the history
+          fetchAllSoldPlayers(true);
         }
         // Handle bid update
         if (data && data.type === 'bid') {
@@ -187,13 +234,35 @@ export const AdminPlayerImage: React.FC<AdminPlayerImageProps> = ({ player, onCl
           if (String(data.playerId) === currentPlayerId) {
             const amt = Number(data.amount || 0);
             setBidAmount(Number.isFinite(amt) ? amt : 0);
-            try { localStorage.setItem(`bid_${currentPlayerId}`, String(amt)); } catch {}
+            try { 
+              localStorage.setItem(`bid_${currentPlayerId}`, String(amt));
+              // Also store total price if provided
+              if (data.totalPrice !== undefined) {
+                localStorage.setItem(`total_${currentPlayerId}`, String(data.totalPrice));
+              }
+            } catch {}
           }
+        }
+        // Handle refresh request
+        if (data && data.type === 'refresh') {
+          fetchAllSoldPlayers(true);
         }
       };
     } catch {}
     return () => { try { bc && bc.close(); } catch {} };
   }, [playerId, tournamentId, livePlayer, fetchAllSoldPlayers]);
+
+  // Automatic background refresh for sold list
+  useEffect(() => {
+    if (!tournamentId) return;
+    
+    const refreshInterval = setInterval(() => {
+      // Silently refresh sold players list every 5 seconds
+      fetchAllSoldPlayers(true);
+    }, 5000);
+    
+    return () => clearInterval(refreshInterval);
+  }, [tournamentId, fetchAllSoldPlayers]);
 
   // Also listen to storage events as a robustness fallback
   useEffect(() => {
@@ -212,7 +281,24 @@ export const AdminPlayerImage: React.FC<AdminPlayerImageProps> = ({ player, onCl
     const n = Number(livePlayer.base_price || livePlayer.basePrice || 0);
     return Number.isFinite(n) ? n : 0;
   }, [livePlayer.base_price, livePlayer.basePrice]);
-  const currentPrice = basePriceNum + (Number.isFinite(bidAmount) ? bidAmount : 0);
+  
+  // Calculate current price: use stored total if available, otherwise base + bid
+  const currentPrice = useMemo(() => {
+    const currentPlayerId = String((livePlayer as any).id || playerId || '').trim();
+    if (currentPlayerId) {
+      try {
+        const storedTotal = localStorage.getItem(`total_${currentPlayerId}`);
+        if (storedTotal) {
+          const total = Number(storedTotal);
+          if (Number.isFinite(total) && total > 0) {
+            return total;
+          }
+        }
+      } catch {}
+    }
+    // Fallback: base price + current bid amount
+    return basePriceNum + (Number.isFinite(bidAmount) ? bidAmount : 0);
+  }, [basePriceNum, bidAmount, livePlayer, playerId]);
 
   return (
     <div className="fixed inset-0 bg-gradient-to-br from-purple-900 via-indigo-800 to-blue-900 flex items-center justify-center z-50 p-6">
@@ -226,12 +312,13 @@ export const AdminPlayerImage: React.FC<AdminPlayerImageProps> = ({ player, onCl
                 <div className="text-sm opacity-80">No sold players yet.</div>
               ) : (
                 soldList.map((s, idx) => (
-                  <div key={`${s.playerId}-${s.teamId}-${idx}`} className="bg-white/10 rounded-lg p-2 flex items-center justify-between">
-                    <div className="truncate flex-1 min-w-0">
-                      <div className="text-sm font-medium truncate">{s.playerName || 'Unknown Player'}</div>
-                      <div className="text-xs opacity-80 truncate">Team: {s.teamName || 'Unknown Team'}</div>
+                  <div key={`${s.playerId}-${s.teamId}-${idx}`} className="bg-white/10 rounded-lg p-2">
+                    <div className="flex items-center justify-between mb-1">
+                      <div className="text-sm font-medium truncate flex-1 min-w-0">
+                        {s.playerName || 'Unknown Player'} <span className="text-white/60">--&gt;</span> <span className="text-white/90">{s.teamName || 'Unknown Team'}</span>
+                      </div>
+                      <div className="text-sm font-semibold ml-2 flex-shrink-0">৳{s.amount || 0}</div>
                     </div>
-                    <div className="text-sm font-semibold ml-2 flex-shrink-0">৳{s.amount || 0}</div>
                   </div>
                 ))
               )}
