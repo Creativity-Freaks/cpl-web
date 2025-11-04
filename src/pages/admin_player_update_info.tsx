@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { X, ChevronDown, Check, DollarSign } from 'lucide-react';
 
 // --- CONFIG ---
-const API_BASE = "http://192.168.0.113:8000";
+import { API_BASE, buildUrl } from '../config/api';
 const API_TIMEOUT = 10000;
 
 // --- API HELPER ---
@@ -22,7 +22,7 @@ const api = {
     }
 
     try {
-      const response = await fetch(`${API_BASE}${url}`, {
+      const response = await fetch(buildUrl(url), {
         ...options,
         headers,
         signal: controller.signal,
@@ -266,19 +266,24 @@ export const AdminPlayerUpdateInfo: React.FC<AdminPlayerUpdateInfoProps> = ({ pl
               value={formData.start_players}
               onChange={handleInputChange}
               options={[
-                { value: 'A', label: 'A' },
-                { value: 'B', label: 'B' },
-                { value: 'C', label: 'C' },
-                { value: 'D', label: 'D' },
-                { value: 'E', label: 'E' },
-                { value: 'F', label: 'F' },
-                { value: 'G', label: 'G' },
-                { value: 'H', label: 'H' },
-                { value: 'I', label: 'I' },
-                { value: 'J', label: 'J' },
+                { value: 'A', label: 'STAR' },
+                { value: 'B', label: 'Diamond-1' },
+                { value: 'C', label: 'Diamond-2' },
+                { value: 'D', label: 'Platinum-1' },
+                { value: 'E', label: 'Platinum-2' },
+                { value: 'F', label: 'Gold-1' },
+                { value: 'G', label: 'Gold-2' },
+                { value: 'H', label: 'Silver-1' },
+                { value: 'I', label: 'Silver-2' },
+                { value: 'J', label: 'Bronze-1' },
+                { value: 'K', label: 'Bronze-2' },
+                { value: 'L', label: 'Titanium-1' },
+                { value: 'M', label: 'Titanium-2' },
+
+                
               ]}
               error={error && !formData.start_players ? "Start player position is required" : null}
-              placeholder="Select A-J"
+              placeholder="Select Platinum-1, Gold-2, ..."
             />
 
             {/* Error Display */}

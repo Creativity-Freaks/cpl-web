@@ -1,10 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Trophy, Users, DollarSign, LogOut, Activity } from 'lucide-react';
 import DatePicker from 'react-datepicker';
 import "react-datepicker/dist/react-datepicker.css";
 import { useNavigate } from "react-router-dom";
 import { AdminAuctionPlayerDetails } from './admin_auction_player_details';
 import { AdminPlayerUpdateInfo } from './admin_player_update_info';
+import { AdminPlayerImage } from './admin_player_image';
 // --- CONFIG ---
 import { API_BASE, LOGIN_URL, buildUrl } from '../config/api';
 const API_TIMEOUT = 10000;
@@ -13,28 +14,23 @@ const api = {
 async request(url: string, options: RequestInit = {}) {
 const controller = new AbortController();
 const id = setTimeout(() => controller.abort(), API_TIMEOUT);
-
 const token = localStorage.getItem("auth_token");
 const headers: HeadersInit = {
   "Content-Type": "application/json",
   ...options.headers,
 };
-
 if (token && !url.includes("/token")) {
   headers["Authorization"] = `Bearer ${token}`;
 }
-
 try {
   const response = await fetch(buildUrl(url), {
     ...options,
     headers,
     signal: controller.signal,
   });
-
   clearTimeout(id);
   const text = await response.text();
   console.log(`API ${options.method || 'GET'} ${url} →`, response.status, text);
-
   if (!response.ok) {
     let errMsg = "Request failed";
     try {
@@ -43,7 +39,6 @@ try {
     } catch {}
     throw new Error(errMsg);
   }
-
   try {
     return JSON.parse(text);
   } catch {
@@ -65,10 +60,13 @@ const Card = ({ children, className = '', ...p }: any) => (
 const Admin: React.FC = () => {
 const navigate = useNavigate();
 const [isAuthenticated, setIsAuthenticated] = useState(!!localStorage.getItem("auth_token"));
-const [activeSection, setActiveSection] = useState("tournaments");
+const [activeSection, setActiveSection] = useState(() => {
+try { return localStorage.getItem('admin_active_section') || 'tournaments'; } catch { return 'tournaments'; }
+});
 const [toastMsg, setToastMsg] = useState<{type: 'success' | 'error', msg: string} | null>(null);
 const [selectedPlayerId, setSelectedPlayerId] = useState<string | null>(null);
 const [selectedUpdatePlayer, setSelectedUpdatePlayer] = useState<any | null>(null);
+const [selectedLivePlayer, setSelectedLivePlayer] = useState<any | null>(null);
 const [updatedPlayers, setUpdatedPlayers] = useState<any[]>([]);
 // Tournament States
 const [tournaments, setTournaments] = useState<any[]>([]);
@@ -91,18 +89,25 @@ const [newMatch, setNewMatch] = useState({ homeTeamId: '', awayTeamId: '', date:
 const [auctionTournamentId, setAuctionTournamentId] = useState<number | null>(null);
 // Live Auction states
 const [livePlayers, setLivePlayers] = useState<any[]>([]);
+const [loadingLivePlayers, setLoadingLivePlayers] = useState(false);
 const [liveCategory, setLiveCategory] = useState<string>('Batter');
 const [liveAmount, setLiveAmount] = useState<string>('');
 const [selectedLiveTeamId, setSelectedLiveTeamId] = useState<number | null>(null);
 const [selectedLiveTeamStats, setSelectedLiveTeamStats] = useState<any | null>(null);
+const [lastClickedPlayer, setLastClickedPlayer] = useState<any | null>(null);
+const bcRef = useRef<BroadcastChannel | null>(null);
+const playerImageWindowRef = useRef<Window | null>(null);
+const [allTeamsStatsMap, setAllTeamsStatsMap] = useState<Record<string, any>>({});
 const [allPlayers, setAllPlayers] = useState<any[]>([]);
 const [displayedPlayers, setDisplayedPlayers] = useState<any[]>([]);
 const [pendingSelectedPlayers, setPendingSelectedPlayers] = useState<any[]>([]);
 const [confirmedAuctionPlayers, setConfirmedAuctionPlayers] = useState<any[]>([]);
 const [displayedConfirmedPlayers, setDisplayedConfirmedPlayers] = useState<any[]>([]);
 const [loadingAuctionPlayers, setLoadingAuctionPlayers] = useState(false);
+const [selectingPlayers, setSelectingPlayers] = useState(false);
 const [visibleCount] = useState(5); // 5 players at a time
 const visibleCountConfirmed = 5;
+const [teamCoinInputMap, setTeamCoinInputMap] = useState<Record<string, number>>({});
 const toast = {
 success: (msg: string) => setToastMsg({type: 'success' as const, msg: `Success: ${msg}`}),
 error: (msg: string) => setToastMsg({type: 'error' as const, msg: `Error: ${msg}`}),
@@ -113,6 +118,10 @@ const timer = setTimeout(() => setToastMsg(null), 3000);
 return () => clearTimeout(timer);
 }
 }, [toastMsg]);
+// Persist and restore active section across reloads
+useEffect(() => {
+try { if (activeSection) localStorage.setItem('admin_active_section', activeSection); } catch {}
+}, [activeSection]);
 // --- FETCH TOURNAMENTS ---
 const fetchTournaments = async () => {
 try {
@@ -176,27 +185,21 @@ setUpdatedPlayers([]);
 setLoadingAuctionPlayers(false);
 return;
 }
-
 setLoadingAuctionPlayers(true);
 let allPlayersList: any[] = [];
 try {
   // Fetch all players (full details)
   const allData = await api.get("/api/v1/adminall/players");
   allPlayersList = Array.isArray(allData) ? allData : [];
-
   // Fetch raw confirmed auction players
   const confirmedRaw = await fetchConfirmedAuctionPlayers(auctionTournamentId);
-
   // Extract confirmed IDs for filtering
   const confirmedIds = confirmedRaw.map((p: any) => p.player_id || p.id);
-
   // Filter available players
   const availablePlayers = allPlayersList.filter((p: any) => !confirmedIds.includes(p.id));
-
   setAllPlayers(availablePlayers);
   setDisplayedPlayers(availablePlayers.slice(0, visibleCount));
   setPendingSelectedPlayers([]);
-
   // Merge full details for confirmed players
   const fullConfirmed = confirmedRaw.map((c: any) => {
     const fullP = allPlayersList.find((p: any) => p.id === (c.player_id || c.id));
@@ -210,10 +213,8 @@ try {
     }
     return { ...c, name: c.player_name }; // Fallback to raw if no match
   });
-
   setConfirmedAuctionPlayers(fullConfirmed);
   setDisplayedConfirmedPlayers(fullConfirmed.slice(0, visibleCountConfirmed));
-
   // Filter updated players: those with start_players and base_price set
   const updated = fullConfirmed.filter((p: any) => p.start_players && p.base_price && p.start_players !== '' && p.base_price !== 0);
   setUpdatedPlayers(updated);
@@ -229,6 +230,46 @@ try {
 } finally {
   setLoadingAuctionPlayers(false);
 }
+};
+// --- FETCH LIVE PLAYERS ---
+const fetchLivePlayers = async () => {
+  if (!auctionTournamentId) {
+    setLivePlayers([]);
+    return;
+  }
+  setLoadingLivePlayers(true);
+  try {
+    // Fetch raw auction players
+    const auctionData = await api.get(`/api/v1/admin/auction/tournaments/${auctionTournamentId}/players`);
+   
+    // Fetch all players for full details to merge accurate categories
+    const allData = await api.get("/api/v1/adminall/players");
+    const allPlayersList = Array.isArray(allData) ? allData : [];
+    // Map auction to full details, prioritizing full player category
+    let normalized = Array.isArray(auctionData)
+      ? auctionData.map((p: any) => {
+          const fullP = allPlayersList.find((ap: any) => ap.id === (p.player_id ?? p.id));
+          const fullCategory = fullP ? (fullP.category ?? fullP.player_category ?? fullP.role ?? '') : (p.category ?? p.player_category ?? p.role ?? '');
+          return {
+            id: p.player_id ?? p.id,
+            auction_player_id: p.auction_player_id ?? p.id,
+            name: p.player_name ?? p.name ?? fullP?.name,
+            email: p.email ?? p.player_email ?? fullP?.email,
+            category: fullCategory, // Use full player category for accuracy
+            start_players: p.start_players ?? p.start_section ?? p.section,
+            base_price: p.base_price ?? p.basePrice ?? 0,
+            photo_url: p.photo_url ?? p.image_url ?? p.avatar_url ?? fullP?.photo_url,
+          };
+        })
+      : [];
+    // Remove duplicates by player ID
+    normalized = [...new Map(normalized.map((item: any) => [item.id, item])).values()];
+    setLivePlayers(normalized);
+  } catch {
+    setLivePlayers([]);
+  } finally {
+    setLoadingLivePlayers(false);
+  }
 };
 // --- HANDLE SCROLL TO LOAD MORE (5 at a time) ---
 const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
@@ -263,30 +304,24 @@ if (!auctionTournamentId || auctionTournamentId === 0) {
 toast.error("Please select a valid tournament!");
 return;
 }
-
 if (pendingSelectedPlayers.length === 0) {
   toast.error("Select at least one player!");
   return;
 }
-
 const tournamentId = parseInt(String(auctionTournamentId), 10);
 const playerIds = pendingSelectedPlayers.map(p => parseInt(String(p.id), 10)).filter(id => !isNaN(id));
-
 if (isNaN(tournamentId) || playerIds.length === 0) {
   toast.error("Invalid IDs!");
   return;
 }
-
 const url = `/api/v1/admin/auction/select-players?tournament_id=${tournamentId}`;
 const payload = playerIds;
-
 console.log("🚀 Sending payload:", JSON.stringify(payload, null, 2));
 console.log("🚀 To URL:", url);
-
+setSelectingPlayers(true);
 try {
   const response = await api.post(url, payload);
   console.log("✅ API Response:", response);
-
   let addedConfirmed = pendingSelectedPlayers;
   if (Array.isArray(response)) {
     addedConfirmed = pendingSelectedPlayers.map(sp => {
@@ -294,9 +329,7 @@ try {
       return match ? { ...sp, auction_player_id: match.auction_player_id || match.id } : sp;
     });
   }
-
   const numAdded = addedConfirmed.length;
-
   // Local update
   setConfirmedAuctionPlayers(prev => [...prev, ...addedConfirmed]);
   setDisplayedConfirmedPlayers(prev => {
@@ -305,15 +338,17 @@ try {
     return newSlice.length < confirmedAuctionPlayers.length + addedConfirmed.length ? newSlice : [...prev, ...addedConfirmed];
   });
   setPendingSelectedPlayers([]);
-
   const idsToRemove = pendingSelectedPlayers.map(p => p.id);
   setAllPlayers(prev => prev.filter(p => !idsToRemove.includes(p.id)));
   setDisplayedPlayers(prev => prev.filter(p => !idsToRemove.includes(p.id)));
-
   toast.success(`${numAdded} players added to auction!`);
+  // Refresh live players immediately
+  await fetchLivePlayers();
 } catch (error: any) {
   console.error("❌ API Error Details:", error);
   toast.error(`Failed: ${error.message}`);
+} finally {
+  setSelectingPlayers(false);
 }
 };
 // --- REMOVE PLAYER FROM AUCTION ---
@@ -322,13 +357,13 @@ if (!auctionPlayerId) {
 toast.error("Invalid player ID");
 return;
 }
-
 try {
   await api.delete(`/api/v1/admin/auction/remove-player/${auctionPlayerId}`);
   toast.success("Player removed from auction");
-
   // Refetch data to update lists from server
   await loadAuctionData();
+  // Also refresh live players
+  await fetchLivePlayers();
 } catch (error: any) {
   toast.error("Remove failed: " + error.message);
 }
@@ -339,7 +374,6 @@ if (!createTeamTournamentId || !newTeam.name.trim() || !newTeam.code.trim()) {
 toast.error("Tournament, Name & Code required");
 return;
 }
-
 try {
   await api.post("/api/v1/admin/teams", {
     tournament_id: createTeamTournamentId,
@@ -359,12 +393,10 @@ if (!selectedMatchTournamentId || !newMatch.homeTeamId || !newMatch.awayTeamId |
 toast.error("All fields required");
 return;
 }
-
 if (parseInt(newMatch.homeTeamId) === parseInt(newMatch.awayTeamId)) {
   toast.error("Home and away teams must be different");
   return;
 }
-
 try {
   await api.post("/api/v1/admin/matches", {
     tournament_id: selectedMatchTournamentId,
@@ -384,7 +416,6 @@ try {
 const updateMatchStatus = async (id: number, status: string) => {
 const previous = matches.find(m => m.id === id);
 setMatches(p => p.map(m => m.id === id ? { ...m, status } : m));
-
 try {
   await api.put(`/api/v1/admin/matches/${id}/status?new_status=${status}`, {});
   toast.success("Match status updated to " + status);
@@ -400,14 +431,12 @@ if (!newTournament.name || !newTournament.year || !newTournament.startDate || !n
 toast.error("Fill all fields");
 return;
 }
-
 const payload = {
   name: newTournament.name.trim(),
   year: parseInt(newTournament.year),
   start_date: newTournament.startDate!.toISOString().split('T')[0],
   end_date: newTournament.endDate!.toISOString().split('T')[0]
 };
-
 try {
   await api.post("/api/v1/admin/tournaments/create", payload);
   setNewTournament({ name: '', year: '', startDate: null, endDate: null });
@@ -421,7 +450,6 @@ try {
 const updateStatus = async (id: number, status: string) => {
 const previous = tournaments.find(t => t.id === id);
 setTournaments(p => p.map(t => t.id === id ? { ...t, status } : t));
-
 try {
   await api.put(`/api/v1/admin/tournaments/${id}/status?new_status=${status}`, {});
   toast.success("Status updated to " + status);
@@ -451,26 +479,16 @@ setMatches([]);
 useEffect(() => {
 loadAuctionData();
 }, [auctionTournamentId]);
-
 // Also fetch teams when live auction tournament changes
 useEffect(() => {
   if (auctionTournamentId) {
     fetchTeams(auctionTournamentId);
   }
 }, [auctionTournamentId]);
-
-// Fetch all players for Live Auction view from adminall/players
+// Fetch Live Auction players for selected tournament (category-wise filtering happens in UI)
 useEffect(() => {
-  (async () => {
-    try {
-      const data = await api.get(`/api/v1/adminall/players`);
-      setLivePlayers(Array.isArray(data) ? data : []);
-    } catch {
-      setLivePlayers([]);
-    }
-  })();
-}, []);
-
+  fetchLivePlayers();
+}, [auctionTournamentId]);
 // Fetch team stats when a team is selected in Live Auction
 useEffect(() => {
   if (!selectedLiveTeamId) {
@@ -515,27 +533,62 @@ useEffect(() => {
     }
   })();
 }, [selectedLiveTeamId]);
-
+// Setup broadcast channel for live updates to other tabs
+useEffect(() => {
+  try {
+    bcRef.current = new BroadcastChannel('auction-updates');
+  } catch {}
+  return () => { try { bcRef.current && bcRef.current.close(); } catch {} };
+}, []);
+// Load teams' stats for the selected tournament and map to team.id
+useEffect(() => {
+  (async () => {
+    try {
+      if (!auctionTournamentId) { setAllTeamsStatsMap({}); return; }
+      const list = await api.get(`/api/v1/admin/dashboard/teams/${auctionTournamentId}/player-distribution`);
+      if (Array.isArray(list)) {
+        const map: Record<string, any> = {};
+        list.forEach((item: any) => {
+          const normalized = normalizeTeamStats(item);
+          const key = String(item.team_id || item.id || '');
+          if (key) map[key] = normalized;
+        });
+        setAllTeamsStatsMap(map);
+      } else {
+        setAllTeamsStatsMap({});
+      }
+    } catch {
+      setAllTeamsStatsMap({});
+    }
+  })();
+}, [auctionTournamentId]);
 // Helpers for Live Auction rendering
 // Robust category normalizer to ensure strict matching with UI filter
-const normalizeCategory = (value: any): 'Batter' | 'Bowler' | 'All-rounder' | 'WK Batsman' | 'Batter' => {
+const normalizeCategory = (value: any): string => {
   const v = String(value || '').trim().toLowerCase().replace(/[-_\s]+/g, '');
+  if (!v) return '';
   if (v === 'wkbatsman' || v === 'wicketkeeperbatsman' || v === 'wk' || v === 'wicketkeeper') return 'WK Batsman';
   if (v === 'allrounder' || v === 'allround' || v === 'all') return 'All-rounder';
   if (v === 'bowler' || v.startsWith('bowl')) return 'Bowler';
   if (v === 'batter' || v.startsWith('bat')) return 'Batter';
-  return 'Batter';
+  return '';
 };
-
 const getPlayerCategory = (p: any) => {
-  const raw = p?.category ?? p?.player_category ?? p?.role ?? p?.group ?? p?.section;
+  const raw = p?.category ?? p?.player_category ?? p?.role;
   return normalizeCategory(raw);
 };
-
+// Bid amount helpers for inline +/- controls
+const parseLiveAmount = (): number => {
+  const n = parseInt(String(liveAmount || '0'), 10);
+  return Number.isFinite(n) ? n : 0;
+};
+const changeLiveAmount = (delta: number) => {
+  const next = Math.max(0, parseLiveAmount() + delta);
+  setLiveAmount(String(next));
+};
 // Normalize varying team stats keys from API into a consistent shape for UI
 const normalizeTeamStats = (stats: any) => {
   if (!stats) return null as any;
-
   // Some backends wrap payloads or return arrays; unwrap them robustly
   let payload: any = stats;
   if (Array.isArray(payload)) {
@@ -544,44 +597,126 @@ const normalizeTeamStats = (stats: any) => {
   if (payload && typeof payload === 'object' && (payload.data || payload.result || payload.payload)) {
     payload = payload.data || payload.result || payload.payload;
   }
-
   if (!payload || typeof payload !== 'object') return null as any;
-
   const toNum = (v: any) => {
     // Accept numbers, numeric strings, and fallback dashes
     if (v === null || v === undefined || v === '-') return undefined;
     const n = Number(String(v).replace(/[,\s]/g, ''));
     return Number.isFinite(n) ? n : undefined;
   };
-
   return {
-    teamCoins: toNum(payload.team_coin ?? payload.team_coins ?? payload.coins ?? payload.teamCoins ?? payload.coin ?? payload.balance),
+    teamCoins: toNum(payload.current_coins ?? payload.total_coins ?? payload.team_coin ?? payload.team_coins ?? payload.coins ?? payload.teamCoins ?? payload.coin ?? payload.balance),
+    totalCoins: toNum(payload.total_coins ?? payload.team_coins ?? payload.coins ?? payload.totalCoins),
     playerCount: toNum(payload.player_count ?? payload.players_count ?? payload.playerCount ?? payload.count),
     maxCount: toNum(payload.max_count ?? payload.max_player ?? payload.max_players ?? payload.maxPlayers),
     available: toNum(payload.available_slots ?? payload.available ?? payload.available_player ?? payload.available_players ?? payload.availableCount),
   };
 };
+// Section label mapping: A→Diamond, B→Platinum, etc.
+const SECTION_LABELS: Record<string, string> = {
+  'A': 'Diamond',
+  'B': 'Platinum',
+  'C': 'Gold-I',
+  'D': 'Gold-II',
+  'E': 'Silver-I',
+  'F': 'Silver-II',
+  'G': 'Bronze-I',
+  'H': 'Bronze-II',
+  'I': 'Titanium-I',
+  'J': 'Titanium-II',
+};
 
-// Sections limited A..J (10 sections), each shows up to 5 players
-const lettersAZ = Array.from({ length: 10 }, (_, i) => String.fromCharCode(65 + i));
+// Mapping from start_players values to section letters
+// Based on admin_player_update_info.tsx: 'A'=STAR, 'B'=Diamond-1, 'C'=Diamond-2, etc.
+// Sections: A=Diamond, B=Platinum, C=Gold-I, D=Gold-II, E=Silver-I, F=Silver-II, G=Bronze-I, H=Bronze-II, I=Titanium-I, J=Titanium-II
+const START_POS_TO_SECTION_LETTER: Record<string, string> = {
+  'A': 'STAR',      // STAR category only (special case)
+  'B': 'A',         // Diamond-1 -> Diamond section (A)
+  'C': 'A',         // Diamond-2 -> Diamond section (A)
+  'D': 'B',         // Platinum-1 -> Platinum section (B)
+  'E': 'B',         // Platinum-2 -> Platinum section (B)
+  'F': 'C',         // Gold-1 -> Gold-I section (C)
+  'G': 'D',         // Gold-2 -> Gold-II section (D)
+  'H': 'E',         // Silver-1 -> Silver-I section (E)
+  'I': 'F',         // Silver-2 -> Silver-II section (F)
+  'J': 'G',         // Bronze-1 -> Bronze-I section (G)
+  'K': 'H',         // Bronze-2 -> Bronze-II section (H)
+  'L': 'I',         // Titanium-1 -> Titanium-I section (I)
+  'M': 'J',         // Titanium-2 -> Titanium-II section (J)
+};
 
+// Build sections A..J with 5 players per section, ordered by highest base price
+// Special handling for STAR category: shows only one section with 5 players
+// Players are filtered by both category AND start_players to ensure they only appear in correct category
 const getSectionedPlayers = (categoryLabel: string) => {
-  const filtered = livePlayers
-    .filter((p: any) => getPlayerCategory(p) === (normalizeCategory(categoryLabel) as any))
-    .sort((a: any, b: any) => Number(b.base_price || b.basePrice || 0) - Number(a.base_price || a.basePrice || 0));
   const perSection = 5;
-  const sections: { key: string; players: any[] }[] = [];
-  for (let i = 0; i < filtered.length && sections.length < lettersAZ.length; i += perSection) {
-    const letter = lettersAZ[sections.length] || `S${sections.length + 1}`;
-    sections.push({ key: letter, players: filtered.slice(i, i + perSection) });
+  const toBasePrice = (p: any) => Number(p.base_price ?? p.basePrice ?? 0) || 0;
+  
+  // Special handling for STAR category
+  if (categoryLabel === 'STAR') {
+    // Filter players by start_players = 'A' (STAR position) only
+    // Exclude players with other start_players values
+    const starPlayers = livePlayers
+      .filter((p: any) => {
+        const startPos = String(p.start_players || '').trim().toUpperCase();
+        return startPos === 'A' || startPos === 'STAR';
+      })
+      .sort((a: any, b: any) => toBasePrice(b) - toBasePrice(a));
+    
+    // Return single STAR section with up to 5 players
+    return [{
+      key: 'STAR',
+      label: 'STAR',
+      players: starPlayers.slice(0, perSection),
+    }];
   }
+  
+  // For other categories: Batter, Bowler, All-rounder, WK Batsman
+  // Filter by: 1) category matches, 2) start_players is NOT 'A' (STAR players excluded)
+  const lettersAZ = Array.from({ length: 10 }, (_, i) => String.fromCharCode(65 + i)); // A..J
+  
+  // First, filter by category and exclude STAR players (start_players = 'A')
+  const categoryFiltered = livePlayers.filter((p: any) => {
+    const playerCategory = getPlayerCategory(p);
+    const matchesCategory = playerCategory === normalizeCategory(categoryLabel);
+    const startPos = String(p.start_players || '').trim().toUpperCase();
+    const isNotStar = startPos !== 'A' && startPos !== 'STAR';
+    return matchesCategory && isNotStar;
+  });
+  
+  // Group players by their start_players and map to sections
+  const sections: { key: string; label: string; players: any[] }[] = [];
+  
+  // For each section letter (A-J), find players whose start_players maps to that section
+  lettersAZ.forEach((letter) => {
+    // Find all start_players values that map to this section letter
+    const matchingStartPositions = Object.keys(START_POS_TO_SECTION_LETTER)
+      .filter(sp => START_POS_TO_SECTION_LETTER[sp] === letter);
+    
+    // Get players with matching start_players
+    const sectionPlayers = categoryFiltered
+      .filter((p: any) => {
+        const startPos = String(p.start_players || '').trim().toUpperCase();
+        return matchingStartPositions.includes(startPos);
+      })
+      .sort((a: any, b: any) => toBasePrice(b) - toBasePrice(a));
+    
+    if (sectionPlayers.length > 0) {
+      sections.push({
+        key: letter,
+        label: SECTION_LABELS[letter] || `Section ${letter}`,
+        players: sectionPlayers.slice(0, perSection), // Limit to 5 per section
+      });
+    }
+  });
+  
   return sections;
 };
 // --- LOGIN PAGE ---
 if (!isAuthenticated) {
 return (
 <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
-<Card className="w-96 shadow-2xl">
+<Card className="w-full max-w-md shadow-2xl mx-4">
 <CardContent>
 <h2 className="text-2xl font-bold text-center mb-6 text-blue-800">CPL Admin Login</h2>
         <div className="space-y-4">
@@ -591,7 +726,6 @@ return (
             const email = (document.getElementById("email") as HTMLInputElement).value.trim();
             const password = (document.getElementById("password") as HTMLInputElement).value.trim();
             if (!email || !password) return toast.error("Email & Password required");
-
             try {
               const formData = new URLSearchParams();
               formData.append('grant_type', 'password');
@@ -599,7 +733,6 @@ return (
               formData.append('password', password);
               formData.append('scope', '');
               formData.append('client_id', '');
-
               // Try multiple likely token endpoints to avoid 404 due to path mismatch
               const candidatePaths = [LOGIN_URL, '/api/v1/token', '/auth/token', '/api/token'];
               let res: Response | null = null;
@@ -646,7 +779,7 @@ return (
 // --- DASHBOARD ---
 return (
 <div className="flex flex-col min-h-screen bg-gray-50">
-<header className="bg-red-600 text-white h-16 flex items-center justify-between px-6">
+<header className="bg-red-600 text-white h-16 flex items-center justify-between px-4 md:px-6">
 <h1 className="text-xl font-bold">CPL Admin</h1>
 <Button className="bg-yellow-500 text-red-600" onClick={() => {
 localStorage.removeItem("auth_token");
@@ -656,9 +789,8 @@ toast.success("Logged out");
 <LogOut className="h-4 w-4 inline mr-1" /> Logout
 </Button>
 </header>
-
   <div className="flex flex-1">
-    <aside className="bg-blue-900 w-64 p-4">
+    <aside className="bg-blue-900 w-64 p-4 hidden md:block">
       <nav>
         {[
           { id: "tournaments", label: "Tournaments", icon: Trophy },
@@ -679,19 +811,16 @@ toast.success("Logged out");
         ))}
       </nav>
     </aside>
-
-    <main className="flex-1 p-8 overflow-auto">
-
+    <main className="flex-1 p-4 md:p-8 overflow-auto">
       {/* === TOURNAMENT SECTION === */}
       {activeSection === "tournaments" && (
         <>
           <h1 className="text-3xl font-bold flex items-center gap-3 mb-6">
             <Trophy className="text-yellow-600" /> Tournament
           </h1>
-
           <Card className="mb-8">
             <CardContent>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div><Label>Name</Label><Input value={newTournament.name} onChange={e => setNewTournament(s => ({...s, name: e.target.value}))} /></div>
                 <div><Label>Year</Label><Input value={newTournament.year} onChange={e => setNewTournament(s => ({...s, year: e.target.value}))} /></div>
                 <div><Label>Start Date</Label>
@@ -707,13 +836,12 @@ toast.success("Logged out");
               </div>
             </CardContent>
           </Card>
-
           <h2 className="text-xl font-bold mb-4">Existing Tournaments</h2>
           {loadingTournaments ? <p>Loading...</p> : tournaments.length === 0 ? <p>No tournaments</p> : (
             <div className="space-y-3">
               {tournaments.map(t => (
-                <Card key={t.id} className="p-4 flex justify-between items-center">
-                  <div>
+                <Card key={t.id} className="p-4 flex flex-col md:flex-row justify-between items-start md:items-center">
+                  <div className="mb-4 md:mb-0">
                     <p className="font-medium">{t.name}</p>
                     <p className="text-sm text-gray-600">{t.year} | {t.start_date} to {t.end_date}</p>
                     <p className="text-xs text-blue-600">Status: {t.status}</p>
@@ -729,14 +857,12 @@ toast.success("Logged out");
           )}
         </>
       )}
-
       {/* === TEAM SECTION === */}
       {activeSection === "team" && (
         <>
           <h1 className="text-3xl font-bold flex items-center gap-3 mb-6">
             <Users className="text-green-600" /> Team Create
           </h1>
-
           <Card className="mb-8">
             <CardContent>
               <div className="space-y-4">
@@ -755,7 +881,6 @@ toast.success("Logged out");
               </div>
             </CardContent>
           </Card>
-
           <div>
             <Label>Select Tournament:</Label>
             <Select value={selectedTournamentId || ''} onChange={e => setSelectedTournamentId(parseInt(e.target.value) || null)}>
@@ -764,7 +889,6 @@ toast.success("Logged out");
                 <option key={t.id} value={t.id}>{t.name} ({t.year})</option>
               ))}
             </Select>
-
             <div className="mt-6">
               {loadingTeams ? <p>Loading teams...</p> : teams.length === 0 ? <p>No teams</p> : (
                 <div className="space-y-3">
@@ -780,14 +904,12 @@ toast.success("Logged out");
           </div>
         </>
       )}
-
       {/* === AUCTION SECTION === */}
       {activeSection === "auction" && (
         <>
           <h1 className="text-3xl font-bold flex items-center gap-3 mb-6">
             <DollarSign className="text-orange-600" /> Auction Player Select
           </h1>
-
           <Card className="mb-8">
             <CardContent>
               <Label>Tournament</Label>
@@ -804,7 +926,6 @@ toast.success("Logged out");
               </Select>
             </CardContent>
           </Card>
-
           {/* Players Multi-Select (5 at a time) */}
           <Card className="mb-6">
             <CardContent>
@@ -849,17 +970,15 @@ toast.success("Logged out");
                   </div>
                 )}
               </div>
-
               <Button
                 onClick={handleSelectPlayersForAuction}
                 className="w-full mt-4"
-                disabled={pendingSelectedPlayers.length === 0 || !auctionTournamentId}
+                disabled={pendingSelectedPlayers.length === 0 || !auctionTournamentId || selectingPlayers}
               >
-                Select Players for Auction ({pendingSelectedPlayers.length})
+                {selectingPlayers ? 'Selecting...' : `Select Players for Auction (${pendingSelectedPlayers.length})`}
               </Button>
             </CardContent>
           </Card>
-
           {/* Confirmed Selected Players - Always show if any */}
           {confirmedAuctionPlayers.length > 0 && (
             <Card>
@@ -902,18 +1021,16 @@ toast.success("Logged out");
           )}
         </>
       )}
-
       {/* === LIVE AUCTION SECTION === */}
       {activeSection === "live-auction" && (
         <>
           <h1 className="text-3xl font-bold flex items-center gap-3 mb-6">
             <Activity className="text-red-600" /> Live Auction
           </h1>
-
           <Card className="mb-6">
             <CardContent>
-              <div className="grid grid-cols-4 gap-4 items-end">
-                <div>
+              <div className="flex flex-col md:flex-row items-end justify-between gap-4">
+                <div className="w-full md:min-w-[260px]">
                   <Label>League / Tournament</Label>
                   <Select value={auctionTournamentId || ''} onChange={e => setAuctionTournamentId(e.target.value ? parseInt(e.target.value, 10) : null)}>
                     <option value="">Select Tournament</option>
@@ -922,80 +1039,95 @@ toast.success("Logged out");
                     ))}
                   </Select>
                 </div>
-                <div>
-                  <Label>Current Bid</Label>
-                  <div className="w-full p-4 border rounded-lg bg-gray-50 font-semibold">৳ 0</div>
-                </div>
-                <div>
-                  <Label>Timer</Label>
-                  <div className="w-full p-4 border rounded-lg bg-gray-50">00:30</div>
-                </div>
+                <div className="flex-1" />
                 <div className="flex justify-end">
                   <Button className="bg-yellow-500 text-red-700" onClick={() => window.open('/settings', '_blank')}>Update Account</Button>
                 </div>
               </div>
-
-              {/* Team Overview banner */}
-              <div className="mt-6">
-                <Card className="bg-gradient-to-r from-blue-50 via-white to-indigo-50 border-blue-100">
-                  <CardContent>
-                    {selectedLiveTeamId ? (
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <div className="text-sm text-gray-500">Team</div>
-                          <div className="text-xl font-bold">
-                            {teams.find(t=>t.id===selectedLiveTeamId)?.team_name || teams.find(t=>t.id===selectedLiveTeamId)?.name || 'Team'}
-                          </div>
+              {/* Team Overview banner removed as per request */}
+              {/* Available teams rendered as stacked banners */}
+              <div className="mt-3 space-y-1.5">
+                {teams.filter((t:any, i:number, a:any[]) => a.findIndex(x => String(x.id) === String(t.id)) === i).slice(0, 50).map((team: any) => (
+                  <Card
+                    key={team.id}
+                    className={`border shadow-sm hover:shadow-md transition rounded-lg ${selectedLiveTeamId===team.id? 'ring-1 ring-blue-400' : ''} bg-white`}
+                    onClick={() => setSelectedLiveTeamId(team.id)}
+                  >
+                    <CardContent className="p-2 md:p-2.5">
+                      <div className="grid grid-cols-12 items-center gap-2">
+                        <div className="col-span-5 md:col-span-4 min-w-0">
+                          <div className="text-[10px] uppercase tracking-wide text-gray-500">Team</div>
+                          <div className="text-sm md:text-base font-semibold truncate">{team.team_name || team.name}</div>
                         </div>
-                        <div className="grid grid-cols-4 gap-4 w-3/4">
-                          <div className="p-3 rounded-lg bg-white border text-center">
-                            <div className="text-xs text-gray-500">Team Coins</div>
-                            <div className="text-lg font-semibold">{selectedLiveTeamStats?.teamCoins ?? '-'}</div>
-                          </div>
-                          <div className="p-3 rounded-lg bg-white border text-center">
-                            <div className="text-xs text-gray-500">Player Count</div>
-                            <div className="text-lg font-semibold">{selectedLiveTeamStats?.playerCount ?? '-'}</div>
-                          </div>
-                          <div className="p-3 rounded-lg bg-white border text-center">
-                            <div className="text-xs text-gray-500">Max Player</div>
-                            <div className="text-lg font-semibold">{selectedLiveTeamStats?.maxCount ?? '-'}</div>
-                          </div>
-                          <div className="p-3 rounded-lg bg-white border text-center">
-                            <div className="text-xs text-gray-500">Available</div>
-                            <div className="text-lg font-semibold">{selectedLiveTeamStats?.available ?? '-'}</div>
-                          </div>
-                        </div>
+                        {(() => {
+                          const s = allTeamsStatsMap[String(team.id)] || {};
+                          const Box = ({label, value}:{label:string, value:any}) => (
+                            <div className="px-1.5 py-1 rounded border bg-gray-50 text-center">
+                              <div className="text-[9px] text-gray-500 leading-none">{label}</div>
+                              <div className="text-[11px] font-semibold leading-tight">{value ?? '-'}</div>
+                            </div>
+                          );
+                          return (
+                            <div className="col-span-7 md:col-span-8 grid grid-cols-5 gap-1.5">
+                              <Box label="Coins" value={s?.teamCoins} />
+                              <Box label="Total Coin" value={s?.totalCoins} />
+                              <Box label="Players" value={s?.playerCount} />
+                              <Box label="Max" value={s?.maxCount} />
+                              <Box label="Avail" value={s?.available} />
+                              <div className="col-span-5 flex items-center gap-2 mt-1">
+                                <input
+                                  type="number"
+                                  className="w-24 px-2 py-1 border rounded"
+                                  placeholder="Add coins"
+                                  value={teamCoinInputMap[String(team.id)] ?? ''}
+                                  onChange={(e)=>{
+                                    const v = Number(e.target.value);
+                                    setTeamCoinInputMap(prev=>({ ...prev, [String(team.id)]: v }));
+                                  }}
+                                />
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={()=>{
+                                    const add = Number(teamCoinInputMap[String(team.id)] ?? 0) || 0;
+                                    if (add === 0) return;
+                                    setAllTeamsStatsMap(prev=>{
+                                      const copy = { ...prev } as any;
+                                      const cur = { ...(copy[String(team.id)] || {}) };
+                                      cur.teamCoins = Number(cur.teamCoins ?? 0) + add;
+                                      copy[String(team.id)] = cur;
+                                      return copy;
+                                    });
+                                    setTeamCoinInputMap(prev=>({ ...prev, [String(team.id)]: 0 }));
+                                    toast.success(`Added ${add} coins to ${team.team_name || team.name}`);
+                                  }}
+                                >
+                                  Add Coin
+                                </Button>
+                              </div>
+                            </div>
+                          );
+                        })()}
                       </div>
-                    ) : (
-                      <div className="text-sm text-gray-600">Select a team from "Team Auction" to view overview here.</div>
-                    )}
-                  </CardContent>
-                </Card>
+                    </CardContent>
+                  </Card>
+                ))}
+                {teams.length === 0 && (
+                  <div className="text-sm text-gray-500">No teams available</div>
+                )}
               </div>
             </CardContent>
           </Card>
-
-          <div className="grid grid-cols-12 gap-6">
-            {/* Left strip - Team Auction */}
-            <div className="col-span-2">
-              <Card>
-                <CardContent>
-                  <h3 className="font-semibold mb-3">Team Auction</h3>
-                  <div className="space-y-2">
-                    {teams.slice(0, 20).map((team) => (
-                      <div key={team.id} onClick={() => setSelectedLiveTeamId(team.id)} className={`p-3 rounded-lg border bg-white text-sm cursor-pointer ${selectedLiveTeamId===team.id? 'border-blue-500 bg-blue-50' : ''}`}>
-                        {team.team_name || team.name}
-                      </div>
-                    ))}
-                    {teams.length === 0 && <p className="text-sm text-gray-500">No teams</p>}
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
-
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 lg:gap-6">
             {/* Center lanes - Section A..Z built by category */}
-            <div className="col-span-7">
-              {getSectionedPlayers(liveCategory).length === 0 ? (
+            <div className="lg:col-span-8 col-span-1">
+              {loadingLivePlayers ? (
+                <Card>
+                  <CardContent>
+                    <p className="text-center py-4">Loading players...</p>
+                  </CardContent>
+                </Card>
+              ) : getSectionedPlayers(liveCategory).length === 0 ? (
                 <Card>
                   <CardContent>
                     <div className="text-sm text-gray-500">No players found for {liveCategory}. Try another tournament or category.</div>
@@ -1005,10 +1137,52 @@ toast.success("Logged out");
                 getSectionedPlayers(liveCategory).map(section => (
                   <Card key={section.key} className="mb-6">
                     <CardContent>
-                      <h3 className="font-semibold mb-3">Section {section.key}</h3>
+                      <h3 className="font-semibold mb-3">{section.label || `Section ${section.key}`}</h3>
                       <div className="space-y-3">
                         {section.players.map((p:any) => (
-                          <div key={p.id} className="h-14 rounded-md border bg-white flex items-center px-4 justify-between cursor-pointer" onClick={() => navigate(`/admin/auction/player/${p.id}`)}>
+                          <div
+                            key={p.id}
+                            className="h-14 rounded-md border bg-white flex items-center px-4 justify-between cursor-pointer hover:bg-gray-50 transition-colors"
+                            onClick={() => {
+                              setLastClickedPlayer({ id: p.id, name: p.name || p.player_name, base_price: (p.base_price ?? p.basePrice ?? 0), auction_player_id: p.auction_player_id });
+                              const playerData = {
+                                id: String(p.id),
+                                name: String(p.name || p.player_name || ''),
+                                email: String(p.email || ''),
+                                category: String(getPlayerCategory(p) || ''),
+                                base_price: String(p.base_price ?? p.basePrice ?? 0),
+                                start_players: String(p.start_players || ''),
+                                photo_url: String(p.photo_url || ''),
+                                tournament_id: String(auctionTournamentId || ''),
+                                auction_player_id: String(p.auction_player_id || ''),
+                              };
+                              
+                              // Check if window already exists and is open
+                              if (playerImageWindowRef.current && !playerImageWindowRef.current.closed) {
+                                // Window exists, send update message via BroadcastChannel
+                                try {
+                                  bcRef.current?.postMessage({
+                                    type: 'player-update',
+                                    payload: playerData,
+                                  });
+                                } catch {}
+                              } else {
+                                // First player or window was closed, open new window
+                                const params = new URLSearchParams(playerData);
+                                const newWindow = window.open(`/admin/live-player/${p.id}?${params.toString()}`, '_blank');
+                                if (newWindow) {
+                                  playerImageWindowRef.current = newWindow;
+                                  // Also send via BroadcastChannel for immediate update
+                                  try {
+                                    bcRef.current?.postMessage({
+                                      type: 'player-update',
+                                      payload: playerData,
+                                    });
+                                  } catch {}
+                                }
+                              }
+                            }}
+                          >
                             <div className="font-medium">{p.name || p.player_name}</div>
                             <div className="text-sm text-gray-500">Base: ৳{p.base_price || p.basePrice || 0}</div>
                           </div>
@@ -1019,54 +1193,202 @@ toast.success("Logged out");
                 ))
               )}
             </div>
-
-            {/* Right controls - Amount + Submit like sketch */}
-            <div className="col-span-3">
+            {/* Right controls - Category, Amount, Overview */}
+            <div className="lg:col-span-4 col-span-1">
               <Card className="mb-6">
                 <CardContent>
                   <Label>Category</Label>
                   <Select value={liveCategory} onChange={e => setLiveCategory(e.target.value)}>
-                    {['Batter','Bowler','All-rounder','WK Batsman'].map(c => (
+                    {['STAR','Batter','Bowler','All-rounder','WK Batsman'].map(c => (
                       <option key={c} value={c}>{c}</option>
                     ))}
                   </Select>
                   <div className="h-4" />
-                  <Label>Amount</Label>
-                  <Input type="number" placeholder="Enter bid amount" value={liveAmount} onChange={e => setLiveAmount(e.target.value)} />
-                  <Button className="w-full mt-4">Place Bid</Button>
+                  <Label>Bid Amount</Label>
+                  <div className="bg-gray-50 border rounded-lg p-2 flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => changeLiveAmount(-50)}
+                      className="rounded-full w-9 h-9 flex items-center justify-center"
+                    >
+                      −
+                    </Button>
+                    <div className="px-3 py-2 bg-white rounded-md border flex items-center gap-2 w-full">
+                      <span className="text-gray-500">৳</span>
+                      <input
+                        type="number"
+                        className="w-full outline-none"
+                        placeholder="Enter bid amount"
+                        value={liveAmount}
+                        onChange={e => setLiveAmount(e.target.value)}
+                      />
+                    </div>
+                    <Button
+                      size="sm"
+                      onClick={() => changeLiveAmount(50)}
+                      className="rounded-full w-9 h-9 flex items-center justify-center"
+                    >
+                      +
+                    </Button>
+                  </div>
+                  <div className="flex flex-wrap gap-2 mt-2">
+                    {[100,200,500,1000].map(v => (
+                      <button
+                        key={v}
+                        className="px-3 py-1 text-sm rounded-full bg-white border text-gray-700 hover:bg-gray-50"
+                        onClick={() => changeLiveAmount(v)}
+                        type="button"
+                      >
+                        +{v}
+                      </button>
+                    ))}
+                  </div>
+                  <Button
+                    className="w-full mt-4"
+                    onClick={() => {
+                      if (!lastClickedPlayer) { toast.error('Open a player first.'); return; }
+                      const amount = parseLiveAmount();
+                      const record = { type: 'bid', playerId: lastClickedPlayer.id, amount, timestamp: Date.now() };
+                      // Persist bid for refresh safety
+                      try {
+                        localStorage.setItem(`bid_${record.playerId}`, String(amount));
+                      } catch {}
+                      // Broadcast to other tabs (admin_player_image listens)
+                      try { bcRef.current?.postMessage(record); } catch {}
+                      toast.success('Bid placed');
+                    }}
+                  >
+                    Place Bid
+                  </Button>
+                  <div className="h-3" />
                 </CardContent>
               </Card>
-
-              <Card>
+              {/* Teams list with per-team Add to Sold */}
+              <Card className="mt-6">
                 <CardContent>
-                  <Label>Team Overview</Label>
-                  {selectedLiveTeamId ? (
-                    <div className="mt-3 text-sm">
-                      <div className="font-semibold mb-1">{teams.find(t=>t.id===selectedLiveTeamId)?.team_name || teams.find(t=>t.id===selectedLiveTeamId)?.name || 'Team'}</div>
-                      <div className="grid grid-cols-2 gap-2">
-                        <div className="p-2 bg-gray-50 rounded border">Team Coins: {selectedLiveTeamStats?.teamCoins ?? '-'}</div>
-                        <div className="p-2 bg-gray-50 rounded border">Player count: {selectedLiveTeamStats?.playerCount ?? '-'}</div>
-                        <div className="p-2 bg-gray-50 rounded border">Max player: {selectedLiveTeamStats?.maxCount ?? '-'}</div>
-                        <div className="p-2 bg-gray-50 rounded border">Available: {selectedLiveTeamStats?.available ?? '-'}</div>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="mt-2 text-sm text-gray-600">Select a team to view coins, player count and availability.</div>
-                  )}
+                  <h3 className="text-lg font-bold mb-3 text-blue-700">Teams {teams.length ? `(${teams.length})` : ''}</h3>
+                  <div className="space-y-3 max-h-72 overflow-y-auto">
+                    {teams.length === 0 ? (
+                      <div className="text-sm text-gray-500">No teams available</div>
+                    ) : (
+                      teams.map(team => (
+                        <div
+                          key={team.id}
+                          className="flex items-center justify-between p-3 bg-white rounded-lg border border-gray-200 hover:bg-gray-50"
+                        >
+                          <div className="min-w-0 mr-3">
+                            <p className="font-semibold truncate">{team.team_name || team.name}</p>
+                            <p className="text-xs text-gray-600 truncate">Code: {team.team_code || team.code || '-'}</p>
+                          </div>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="text-green-700 border-green-300 hover:bg-green-50"
+                            onClick={async () => {
+                              if (!lastClickedPlayer) { toast.error('Open a player first.'); return; }
+                              // Helper to resolve auction_player_id
+                              const resolveAuctionPlayerId = async (): Promise<{ id: number | null; alreadyAssignedTeamId?: number | null }> => {
+                                const fromClicked = (lastClickedPlayer as any)?.auction_player_id;
+                                if (fromClicked) return { id: Number(fromClicked) };
+                                const byLocal = confirmedAuctionPlayers.find((cp:any) => String(cp.id) === String(lastClickedPlayer.id) || String(cp.player_id) === String(lastClickedPlayer.id));
+                                const localId = byLocal?.auction_player_id || byLocal?.id;
+                                if (localId) return { id: Number(localId) };
+                                if (!auctionTournamentId) return null;
+                                try {
+                                  const list = await api.get(`/api/v1/admin/auction/tournaments/${auctionTournamentId}/players`);
+                                  if (Array.isArray(list)) {
+                                    const found = list.find((it:any) => String(it.player_id ?? it.id) === String(lastClickedPlayer.id));
+                                    const id = found?.auction_player_id || found?.id;
+                                    const assigned = Number(found?.sold_to_team_id || 0) || null;
+                                    return id ? { id: Number(id), alreadyAssignedTeamId: assigned } : { id: null };
+                                  }
+                                } catch {}
+                                return { id: null };
+                              };
+                              const resolved = await resolveAuctionPlayerId();
+                              const auctionPlayerId = resolved?.id || null;
+                              if (!auctionPlayerId) { toast.error('auction_player_id not found.'); return; }
+                              // compute sold price = base + bid
+                              const lp = livePlayers.find((x:any)=> String(x.id) === String(lastClickedPlayer.id));
+                              const baseFromList = Number(lp?.base_price ?? lp?.basePrice ?? 0) || 0;
+                              const baseFromState = Number((lastClickedPlayer as any)?.base_price ?? 0) || 0;
+                              const base = baseFromState || baseFromList;
+                              const totalPrice = base + parseLiveAmount();
+                              try {
+                                // Prevent duplicate assignment: if already assigned, skip PUT
+                                let alreadyAssigned = false;
+                                if (resolved?.alreadyAssignedTeamId) {
+                                  alreadyAssigned = true;
+                                }
+                                try {
+                                  if (auctionTournamentId) {
+                                    const teamsList = await api.get(`/api/v1/admin/tournaments/${auctionTournamentId}/teams`);
+                                    if (Array.isArray(teamsList)) {
+                                      const foundTeam = teamsList.find((t:any) => Array.isArray(t.players) && t.players.some((pl:any) => String(pl.id ?? pl.player_id) === String(lastClickedPlayer.id)));
+                                      alreadyAssigned = !!foundTeam;
+                                    }
+                                  }
+                                } catch {}
+
+                                if (!alreadyAssigned) {
+                                  // Try number payload first
+                                  try {
+                                    await api.put(`/api/v1/admin/auction/assign-player/${auctionPlayerId}`, {
+                                      sold_price: Number(totalPrice),
+                                      sold_to_team_id: Number(team.id),
+                                    });
+                                  } catch (e:any) {
+                                    // Retry with string price if server rejects
+                                    await api.put(`/api/v1/admin/auction/assign-player/${auctionPlayerId}`, {
+                                      sold_price: String(totalPrice),
+                                      sold_to_team_id: Number(team.id),
+                                    });
+                                  }
+                                }
+                                const teamName = team?.team_name || team?.name || 'Team';
+                                const record = {
+                                  type: 'sold',
+                                  playerId: lastClickedPlayer.id,
+                                  playerName: lastClickedPlayer.name,
+                                  teamId: team.id,
+                                  teamName,
+                                  amount: totalPrice,
+                                  timestamp: Date.now(),
+                                };
+                                try {
+                                  const key = `sold_${record.playerId}`;
+                                  const prev = JSON.parse(localStorage.getItem(key) || '[]');
+                                  const next = Array.isArray(prev) ? [...prev, record] : [record];
+                                  localStorage.setItem(key, JSON.stringify(next));
+                                } catch {}
+                                try { bcRef.current?.postMessage(record); } catch {}
+                                toast.success(`Assigned and added to Sold: ${teamName}`);
+                                // Remove the player from section list after assignment
+                                setLivePlayers(prev => prev.filter((x:any) => String(x.id) !== String(lastClickedPlayer.id)));
+                              } catch (e:any) {
+                                toast.error('Assign failed: ' + (e?.message || 'Unknown error'));
+                              }
+                            }}
+                          >
+                            Add to Sold
+                          </Button>
+                        </div>
+                      ))
+                    )}
+                  </div>
                 </CardContent>
               </Card>
             </div>
           </div>
         </>
       )}
-
       {/* === AUCTION PLAYERS SECTION === */}
       {activeSection === "auction-players" && (
         <>
           <h1 className="text-3xl font-bold flex items-center gap-3 mb-6">
             <DollarSign className="text-orange-600" /> Auction Players
           </h1>
-
           <Card className="mb-8">
             <CardContent>
               <Label>Tournament</Label>
@@ -1083,7 +1405,6 @@ toast.success("Logged out");
               </Select>
             </CardContent>
           </Card>
-
           {/* Selected Auction Players List */}
           <Card className="mb-6">
             <CardContent>
@@ -1093,18 +1414,19 @@ toast.success("Logged out");
               ) : confirmedAuctionPlayers.length === 0 ? (
                 <p className="text-center py-4 text-gray-500">No selected auction players</p>
               ) : (
-                <div 
-                  className="space-y-3 max-h-80 overflow-y-auto" 
+                <div
+                  className="space-y-3 max-h-80 overflow-y-auto"
                   onScroll={handleScrollConfirmed}
                 >
                   {displayedConfirmedPlayers.map(player => (
                     <div
                       key={player.auction_player_id || player.id}
-                      className="flex justify-between items-center p-4 bg-green-50 rounded-lg border border-green-200"
+                      className="flex justify-between items-center p-4 bg-green-50 rounded-lg border border-green-200 hover:bg-green-100 transition-colors cursor-pointer"
+                      onClick={() => setSelectedUpdatePlayer(player)}
                     >
                       <div className="flex items-center gap-3 flex-1">
                         {player.photo_url && player.photo_url !== 'null' ? (
-                          <img src={`${API_BASE}${player.photo_url}`} alt={player.name} className="w-12 h-12 rounded-full object-cover" />
+                          <img src={buildUrl(player.photo_url)} alt={player.name} className="w-12 h-12 rounded-full object-cover" />
                         ) : (
                           <div className="bg-gray-200 border-2 border-dashed rounded-full w-12 h-12" />
                         )}
@@ -1117,7 +1439,8 @@ toast.success("Logged out");
                         variant="outline"
                         size="sm"
                         className="text-red-600 border-red-300 hover:bg-red-50"
-                        onClick={() => {
+                        onClick={(e) => {
+                          e.stopPropagation();
                           handleRemovePlayer(player.auction_player_id || player.id);
                         }}
                       >
@@ -1129,7 +1452,6 @@ toast.success("Logged out");
               )}
             </CardContent>
           </Card>
-
           {/* Fancy Interactive Divider */}
           {confirmedAuctionPlayers.length > 0 && updatedPlayers.length > 0 && (
             <div className="my-8 relative">
@@ -1143,7 +1465,6 @@ toast.success("Logged out");
               </div>
             </div>
           )}
-
           {/* Updated Players Section - Always show if any */}
           {updatedPlayers.length > 0 && (
             <Card>
@@ -1169,6 +1490,14 @@ toast.success("Logged out");
                           <p className="text-xs text-blue-500 mt-1">Base Price: ${player.base_price} • Start Pos: {player.start_players}</p>
                         )}
                       </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="text-red-600 border-red-300 hover:bg-red-50"
+                        onClick={() => handleRemovePlayer(player.auction_player_id || player.id)}
+                      >
+                        Remove
+                      </Button>
                     </div>
                   ))}
                 </div>
@@ -1177,14 +1506,12 @@ toast.success("Logged out");
           )}
         </>
       )}
-
       {/* === MATCH SECTION === */}
       {activeSection === "match" && (
         <>
           <h1 className="text-3xl font-bold flex items-center gap-3 mb-6">
             <Activity className="text-purple-600" /> Match
           </h1>
-
           <Card className="mb-8">
             <CardContent>
               <div className="space-y-4">
@@ -1199,7 +1526,7 @@ toast.success("Logged out");
                 </div>
                 {selectedMatchTournamentId && (
                   <>
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div>
                         <Label>Home Team</Label>
                         <Select value={newMatch.homeTeamId || ''} onChange={e => setNewMatch(s => ({...s, homeTeamId: e.target.value}))}>
@@ -1233,7 +1560,6 @@ toast.success("Logged out");
               </div>
             </CardContent>
           </Card>
-
           <div className="mt-6">
             <Label>Select Tournament to view matches:</Label>
             <Select value={selectedMatchTournamentId || ''} onChange={e => setSelectedMatchTournamentId(parseInt(e.target.value) || null)}>
@@ -1242,13 +1568,12 @@ toast.success("Logged out");
                 <option key={t.id} value={t.id}>{t.name} ({t.year})</option>
               ))}
             </Select>
-
             <div className="mt-6">
               {loadingMatches ? <p>Loading matches...</p> : matches.length === 0 ? <p>No matches</p> : (
                 <div className="space-y-3">
                   {matches.map(match => (
-                    <Card key={match.id} className="p-4 flex justify-between items-center">
-                      <div>
+                    <Card key={match.id} className="p-4 flex flex-col md:flex-row justify-between items-start md:items-center">
+                      <div className="mb-4 md:mb-0">
                         <p className="font-medium">
                           {teams.find(t => t.id === match.home_team_id)?.team_name || 'Unknown'} vs {teams.find(t => t.id === match.away_team_id)?.team_name || 'Unknown'}
                         </p>
@@ -1270,7 +1595,6 @@ toast.success("Logged out");
       )}
     </main>
   </div>
-
   <Footer />
   {toastMsg && (
     <div className={`fixed top-4 right-4 p-4 rounded-lg shadow-lg z-50 ${toastMsg.type === 'success' ? 'bg-green-500 text-white' : 'bg-red-500 text-white'}`}>
@@ -1278,21 +1602,32 @@ toast.success("Logged out");
     </div>
   )}
   {selectedPlayerId && (
-    <AdminAuctionPlayerDetails 
-      playerId={selectedPlayerId} 
-      onClose={() => setSelectedPlayerId(null)} 
+    <AdminAuctionPlayerDetails
+      playerId={selectedPlayerId}
+      onClose={() => setSelectedPlayerId(null)}
     />
   )}
   {selectedUpdatePlayer && (
-    <AdminPlayerUpdateInfo 
-      player={selectedUpdatePlayer} 
+    <AdminPlayerUpdateInfo
+      player={selectedUpdatePlayer}
       onClose={() => {
         setSelectedUpdatePlayer(null);
         if (auctionTournamentId) loadAuctionData();
       }}
       onUpdate={(updatedData: any) => {
-        if (auctionTournamentId) loadAuctionData();
-      }} 
+        // Immediately reflect in Updated Players list
+        setUpdatedPlayers(prev => {
+          const id = updatedData?.auction_player_id || selectedUpdatePlayer?.auction_player_id || selectedUpdatePlayer?.id;
+          const merged = { ...(selectedUpdatePlayer || {}), ...(updatedData || {}) };
+          const idx = prev.findIndex(p => (p.auction_player_id || p.id) === id);
+          if (idx >= 0) {
+            const copy = [...prev];
+            copy[idx] = { ...copy[idx], ...merged };
+            return copy;
+          }
+          return [...prev, merged];
+        });
+      }}
     />
   )}
 </div>
