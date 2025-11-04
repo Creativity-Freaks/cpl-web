@@ -57,7 +57,7 @@ export default {
         'gradient-card': 'var(--gradient-card)',
       },
       boxShadow: {
-        'glow': 'var(--shadow-glow)',
+        'glow': '0 0 20px rgba(16, 185, 129, 0.5)', // Custom glow for emerald/teal theme
         'accent': 'var(--shadow-accent)',
       },
       borderRadius: {
@@ -102,6 +102,26 @@ export default {
             boxShadow: "0 0 40px hsl(var(--accent) / 0.6)",
           },
         },
+        "fade-in": {
+          "0%": {
+            opacity: "0",
+            transform: "translateY(20px)",
+          },
+          "100%": {
+            opacity: "1",
+            transform: "translateY(0)",
+          },
+        },
+        "slide-up": {
+          "0%": {
+            transform: "translateY(20px)",
+            opacity: "0",
+          },
+          "100%": {
+            transform: "translateY(0)",
+            opacity: "1",
+          },
+        },
       },
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
@@ -109,6 +129,9 @@ export default {
         "fade-in-up": "fade-in-up 0.6s ease-out",
         "scale-in": "scale-in 0.4s ease-out",
         "pulse-glow": "pulse-glow 2s ease-in-out infinite",
+        "fade-in": "fade-in 0.5s ease-in-out",
+        "slide-up": "slide-up 0.5s ease-out",
+        "pulse-slow": "pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite",
       },
       transitionTimingFunction: {
         'smooth': 'cubic-bezier(0.4, 0, 0.2, 1)',

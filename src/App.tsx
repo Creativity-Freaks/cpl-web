@@ -29,6 +29,8 @@ import Terms from "./pages/Terms";
 import Rules from "./pages/Rules";
 import AdminAuction from "./pages/admin_auction";
 import { AdminAuctionPlayerDetails } from "./pages/admin_auction_player_details";
+import { AdminPlayerImagePage } from "./pages/admin_player_image";
+
 
 
 
@@ -69,6 +71,7 @@ const App = () => (
             <Route path="/dashboard" element={<PlayerDashboard />} />
             <Route path="/auction" element={<Auction />} />
             <Route path="/admin/auction/player/:playerId" element={<AdminAuctionPlayerDetails />} />
+            <Route path="/admin/live-player/:id" element={<AdminPlayerImagePage />} />
            
             
 
