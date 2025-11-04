@@ -67,12 +67,12 @@ const TournamentPage = () => {
             <span>{tournament.venue}</span>
           </div>
         </div>
-        <Link to={`/tournament/${tournament.id}`}>
-          <Button className="w-full bg-gradient-accent shadow-accent">
+        <Button asChild className="w-full bg-gradient-accent shadow-accent">
+          <Link to={`/tournament/${String(tournament.id)}`}>
             View Details
             <ArrowRight className="ml-2 h-4 w-4" />
-          </Button>
-        </Link>
+          </Link>
+        </Button>
       </CardContent>
     </Card>
   );

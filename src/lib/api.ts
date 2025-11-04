@@ -91,15 +91,13 @@ export const fetchMatchById = async (
 
 export const fetchTeamsOverview = async (): Promise<UITeamOverview[]> => {
   try {
-    const resp = await fetch(buildUrl("/api/v1/admin/teams"));
-    if (!resp.ok) throw new Error("teams fetch failed");
-    const dataUnknown: unknown = await resp.json();
+    const dataUnknown = await apiFetchJson<unknown>("/api/v1/admin/teams");
     const data = Array.isArray(dataUnknown) ? (dataUnknown as TeamAPIResponse[]) : [];
     return data.map((r) => ({
       id: String(r.id),
-      name: String(r.name),
-      short: String(r.short_name || ""),
-      players: Number(r.players_count || 0),
+      name: String(r.name ?? r.team_name ?? ""),
+      short: String(r.short_name ?? r.team_code ?? ""),
+      players: Number(r.players_count ?? r.player_count ?? 0),
     }));
   } catch (_) {
     return [];
@@ -185,6 +183,8 @@ type TeamAPIResponse = {
   team_name?: string;
   team_code?: string;
   player_count?: number;
+  // sometimes tournament team lists include the real team id under team_id
+  team_id?: string | number;
 };
 
 export const fetchTeamsByTournament = async (tournamentId: string): Promise<UITeamOverview[]> => {
@@ -195,24 +195,24 @@ export const fetchTeamsByTournament = async (tournamentId: string): Promise<UITe
     }
     const data: TeamAPIResponse[] = await response.json();
     const base = data.map((team) => ({
-      id: String(team.id),
+      // Prefer team_id when available; some endpoints return a tournament-team id in id
+      id: String(team.team_id ?? team.id),
       name: String(team.name ?? team.team_name ?? ""),
       short: String(team.short_name ?? team.team_code ?? ""),
       players: Number(team.players_count ?? team.player_count ?? 0),
     }));
-    // Best-effort enrichment for player counts when missing/zero
-    const enriched = await Promise.all(
+    // Always refresh player counts from the dedicated API per requirement
+    const withCounts = await Promise.all(
       base.map(async (t) => {
-        if (t.players && t.players > 0) return t;
         try {
           const count = await getTeamPlayerCount(t.id);
           return { ...t, players: Number(count || 0) };
         } catch {
-          return t;
+          return t; // fall back to existing value if count API fails
         }
       })
     );
-    return enriched;
+    return withCounts;
   } catch (error) {
     console.error("Error fetching teams by tournament:", error);
     return [];
@@ -227,10 +227,15 @@ export async function fetchDepartmentTeam(codeOrName: string): Promise<{ short: 
     const found = teams.find(
       (t) => t.short.toLowerCase() === key || t.name.toLowerCase() === key || t.name.toLowerCase().includes(key)
     );
-    if (!found) return null;
+    if (!found) {
+      // Fallback: construct a minimal object so the department page still renders
+      const fallbackShort = String(codeOrName).toUpperCase();
+      return { short: fallbackShort, description: `${fallbackShort}` };
+    }
     return { short: found.short || found.name, description: `${found.name} (${found.players} players)` };
   } catch (_) {
-    return null;
+    const code = String(codeOrName).toUpperCase();
+    return { short: code, description: code };
   }
 }
 
@@ -361,6 +366,9 @@ export const API_PATHS = {
   updateTeamCoin: (tournamentId: string, teamId: string) => `/api/v1/admin/update/team/coin/${tournamentId}/${teamId}`,
   // Admin stats
   teamPlayerCount: (teamId: string) => `/api/v1/admin/teams/${teamId}/player-count`,
+  teamPlayers: (teamId: string) => `/api/v1/admin/teams/${teamId}/players`,
+  // Players for a specific team in a specific tournament
+  teamPlayersByTournament: (teamId: string, tournamentId: string) => `/api/v1/admin/team/details/${teamId}/${tournamentId}/players`,
   dashboardTournamentOverview: (tournamentId: string) => `/api/v1/admin/dashboard/tournaments/${tournamentId}/overview`,
   dashboardTeamPlayerDistribution: (tournamentId: string) => `/api/v1/admin/dashboard/teams/${tournamentId}/player-distribution`,
   // Auction
@@ -536,13 +544,161 @@ export async function updateTeamCoin(tournamentId: string, teamId: string, paylo
   return apiFetchJson(API_PATHS.updateTeamCoin(tournamentId, teamId), { method: "POST", body: payload });
 }
 export async function getTeamPlayerCount(teamId: string): Promise<number> {
-  return apiFetchJson<number>(API_PATHS.teamPlayerCount(teamId));
+  // API may return a raw number or an object with a count field
+  try {
+    const raw = await apiFetchJson<unknown>(API_PATHS.teamPlayerCount(teamId));
+    if (typeof raw === "number") return raw;
+    if (raw && typeof raw === "object") {
+      const r = raw as Record<string, unknown>;
+      const val = r.count ?? r.player_count ?? r.players_count ?? r.total ?? r.value ?? Object.values(r)[0];
+      const n = Number(val);
+      return Number.isFinite(n) ? n : 0;
+    }
+    return 0;
+  } catch (err) {
+    console.warn("getTeamPlayerCount failed for", teamId, err);
+    return 0;
+  }
 }
 export async function getTournamentOverview(tournamentId: string): Promise<unknown> {
   return apiFetchJson(API_PATHS.dashboardTournamentOverview(tournamentId));
 }
 export async function getTeamPlayerDistribution(tournamentId: string): Promise<unknown> {
   return apiFetchJson(API_PATHS.dashboardTeamPlayerDistribution(tournamentId));
+}
+
+// Teams: players list by team
+export type TeamPlayer = {
+  id: string | number;
+  name: string;
+  category?: string | null; // batter | bowler | all_rounder | wicket_keeper (or custom)
+  photo_url?: string | null;
+};
+
+export async function getTeamPlayers(teamId: string): Promise<Array<TeamPlayer & { avatarUrl: string | null }>> {
+  try {
+    const raw = await apiFetchJson<unknown>(API_PATHS.teamPlayers(teamId));
+    const arr: TeamPlayer[] = Array.isArray(raw) ? (raw as TeamPlayer[]) : [];
+    return arr.map((p) => ({
+      ...p,
+      avatarUrl: resolveProfileImageUrl(p.photo_url ?? null),
+    }));
+  } catch (_) {
+    return [];
+  }
+}
+
+// Fetch team players for a specific tournament using
+// /api/v1/admin/team/details/{team_id}/{tournament_id}/players
+export async function getTeamPlayersByTournament(
+  teamId: string,
+  tournamentId: string
+): Promise<Array<TeamPlayer & { avatarUrl: string | null }>> {
+  try {
+    const raw = await apiFetchJson<unknown>(API_PATHS.teamPlayersByTournament(teamId, tournamentId));
+    const arr: TeamPlayer[] = Array.isArray(raw) ? (raw as TeamPlayer[]) : [];
+    return arr.map((p) => ({
+      ...p,
+      avatarUrl: resolveProfileImageUrl(p.photo_url ?? null),
+    }));
+  } catch (_) {
+    return [];
+  }
+}
+
+// Parse the dashboard player-distribution payload to extract players for a given team short code
+export async function getPlayersByTeamFromDistribution(
+  tournamentId: string,
+  teamShort: string
+): Promise<{ teamId?: string; teamName?: string; players: Array<TeamPlayer & { avatarUrl: string | null }> }> {
+  try {
+    const raw = await getTeamPlayerDistribution(tournamentId);
+    const key = String(teamShort).toLowerCase();
+
+    type TeamPlayerLike = { id?: string | number; player_id?: string | number; name?: string; player_name?: string; full_name?: string; category?: string; role?: string; photo_url?: string | null; photo?: string | null; image_url?: string | null };
+    type DistBucket = { team_id?: string | number; team_code?: string; short_name?: string; code?: string; team?: string; team_name?: string; players?: TeamPlayerLike[] };
+
+    const mapPlayer = (p: TeamPlayerLike): TeamPlayer & { avatarUrl: string | null } => {
+      const name = String(p?.name ?? p?.player_name ?? p?.full_name ?? "");
+      const category = (p?.category ?? p?.role ?? null) ?? null;
+      const photo = (p?.photo_url ?? p?.photo ?? p?.image_url ?? null) ?? null;
+      const id = String((p?.id ?? p?.player_id ?? name) ?? name);
+      return { id, name, category: category as string | null, photo_url: photo, avatarUrl: resolveProfileImageUrl(photo) };
+    };
+
+    const matchesTeam = (bucket?: DistBucket) => {
+      if (!bucket) return false;
+      const short = String(bucket?.team_code ?? bucket?.short_name ?? bucket?.code ?? bucket?.team ?? "").toLowerCase();
+      const name = String(bucket?.team_name ?? bucket?.team ?? "").toLowerCase();
+      return (
+        short === key ||
+        name === key ||
+        (name && name.includes(key)) ||
+        (key && key.includes(name))
+      );
+    };
+
+    const bucketsFrom = (obj: unknown): DistBucket[] => {
+      const arr: DistBucket[] = [];
+      const tryPush = (val: unknown) => {
+        if (Array.isArray(val)) arr.push(...(val as unknown as DistBucket[]));
+      };
+      if (Array.isArray(obj)) tryPush(obj);
+      if (obj && typeof obj === "object") {
+        const o = obj as Record<string, unknown>;
+        // common keys
+        tryPush(o["data"]);
+        tryPush(o["result"]);
+        tryPush(o["results"]);
+        tryPush(o["response"]);
+        tryPush(o["payload"]);
+        tryPush(o["teams"]);
+        tryPush(o["distribution"]);
+        tryPush(o["by_team"]);
+      }
+      return arr;
+    };
+
+    // Direct array of buckets
+    const buckets = bucketsFrom(raw);
+    if (buckets.length === 0 && raw && typeof raw === "object") {
+      // maybe nested deeply under data.*
+      const top = raw as Record<string, unknown>;
+      for (const v of Object.values(top)) buckets.push(...bucketsFrom(v));
+    }
+    if (buckets.length > 0) {
+      for (const b of buckets) {
+        if (matchesTeam(b)) {
+          const list = Array.isArray(b?.players) ? (b.players as TeamPlayerLike[]) : [];
+          const players = list.map(mapPlayer);
+          return { teamId: b?.team_id !== undefined ? String(b.team_id) : undefined, teamName: String(b?.team_name ?? b?.team ?? teamShort), players };
+        }
+      }
+    }
+    // Case 2: object map { CSIT: [players], CSE: [players] } or { teams: [...] }
+    if (raw && typeof raw === "object") {
+      const obj = raw as Record<string, unknown>;
+      if (Array.isArray(obj.teams)) {
+        const buckets = obj.teams as unknown as DistBucket[];
+        for (const b of buckets) {
+          if (matchesTeam(b)) {
+            const list = Array.isArray(b?.players) ? (b.players as TeamPlayerLike[]) : [];
+            const players = list.map(mapPlayer);
+            return { teamId: b?.team_id !== undefined ? String(b.team_id) : undefined, teamName: String(b?.team_name ?? b?.team ?? teamShort), players };
+          }
+        }
+      }
+      // Direct map by key
+      for (const [k, v] of Object.entries(obj)) {
+        if (k.toLowerCase() === key && Array.isArray(v)) {
+          const list = v as unknown as TeamPlayerLike[];
+          const players = list.map(mapPlayer);
+          return { teamName: k, players };
+        }
+      }
+    }
+  } catch (_) { /* noop */ }
+  return { teamName: teamShort, players: [] };
 }
 
 // Auction

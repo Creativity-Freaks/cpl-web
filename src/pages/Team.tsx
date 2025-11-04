@@ -110,7 +110,7 @@ const TeamPage = () => {
                     <div className="flex items-start justify-between">
                       <div className="flex items-center gap-3">
                         <Icon className="h-6 w-6 text-accent" />
-                        <h3 className="text-xl font-bold text-foreground">{dept.short}</h3>
+                        <h3 className="text-xl font-bold text-foreground">{dept.description} {dept.short ? `(${dept.short})` : ''}</h3>
                       </div>
                       <Badge className="bg-primary-glow text-primary-foreground">{selectedTournament ? (selectedTournament.year ? `${selectedTournament.year}` : "CPL") : "CPL"}</Badge>
                     </div>
@@ -118,7 +118,7 @@ const TeamPage = () => {
                     <div className="flex justify-between items-center">
                       <p className="text-xs text-muted-foreground">Players: {dept.players}</p>
                        <Button asChild size="sm" className="bg-gradient-accent shadow-accent">
-                         <Link to={`/team/${encodeURIComponent(dept.short || dept.key)}`}>View details</Link>
+                         <Link to={`/team/${encodeURIComponent(dept.short || dept.key)}?t=${encodeURIComponent(selectedTournamentId || "")}`}>View details</Link>
                        </Button>
                     </div>
                   </CardContent>
