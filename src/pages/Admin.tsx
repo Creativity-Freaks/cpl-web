@@ -835,7 +835,7 @@ const Admin: React.FC = () => {
   const getSectionedPlayers = useCallback((categoryLabel: string) => {
     const perSection = 5;
     const toBasePrice = (p: any) => Number(p.base_price ?? p.basePrice ?? 0) || 0;
-   
+
     // Special handling for STAR category
     if (categoryLabel === 'STAR') {
       // Filter players by start_players = 'A' (STAR position) only
@@ -845,11 +845,11 @@ const Admin: React.FC = () => {
           return startPos === 'A' || startPos === 'STAR';
         })
         .sort((a: any, b: any) => toBasePrice(b) - toBasePrice(a));
-     
-      // Return single STAR section with up to 5 players
+
+      // Return single ELITE section with up to 5 players
       return [{
         key: 'STAR',
-        label: 'STAR',
+        label: 'ELITE STAR Players',
         players: starPlayers.slice(0, perSection),
       }];
     }
@@ -1429,7 +1429,7 @@ const Admin: React.FC = () => {
                     <CardContent className="p-4 md:p-6">
                       <Label>Category</Label>
                       <Select value={liveCategory} onChange={e => setLiveCategory(e.target.value)}>
-                        {['STAR','Batter','Bowler','All-rounder','WK Batsman'].map(c => (
+                        {['Elite','Batter','Bowler','All-rounder','WK Batsman'].map(c => (
                           <option key={c} value={c}>{c}</option>
                         ))}
                       </Select>
