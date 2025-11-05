@@ -292,24 +292,22 @@ export const AdminPlayerUpdateInfo: React.FC<AdminPlayerUpdateInfoProps> = ({ pl
               value={formData.start_players}
               onChange={handleInputChange}
               options={[
-                { value: 'A', label: 'STAR' },
-                { value: 'B', label: 'Diamond-1' },
-                { value: 'C', label: 'Diamond-2' },
-                { value: 'D', label: 'Platinum-1' },
-                { value: 'E', label: 'Platinum-2' },
-                { value: 'F', label: 'Gold-1' },
-                { value: 'G', label: 'Gold-2' },
-                { value: 'H', label: 'Silver-1' },
-                { value: 'I', label: 'Silver-2' },
-                { value: 'J', label: 'Bronze-1' },
-                { value: 'K', label: 'Bronze-2' },
-                { value: 'L', label: 'Titanium-1' },
-                { value: 'M', label: 'Titanium-2' },
+                { value: 'A', label: 'Elite' },
+                { value: 'B', label: 'Platinum' },
+                { value: 'C', label: 'Diamond' },
+                { value: 'D', label: 'Gold-1' },
+                { value: 'E', label: 'Gold-2' },
+                { value: 'F', label: 'Silver-1' },
+                { value: 'G', label: 'Silver-2' },
+                { value: 'H', label: 'Bronze-1' },
+                { value: 'I', label: 'Bronze-2' },
+                { value: 'J', label: 'Titanium-1' },
+                { value: 'K', label: 'Titanium-2' },
 
                 
               ]}
               error={error && !formData.start_players ? "Start player position is required" : null}
-              placeholder="Select Platinum-1, Gold-2, ..."
+              placeholder="Select Platinum, Diamond, ..."
             />
 
             {/* Error Display */}
