@@ -38,21 +38,22 @@ export const AdminPlayerImage: React.FC<AdminPlayerImageProps> = ({ player, onCl
     return raw;
   };
 
-  const demoImages = [
-    "https://images.pexels.com/photos/2240844/pexels-photo-2240844.jpeg?auto=compress&cs=tinysrgb&w=800",
-    "https://images.pexels.com/photos/1596445/pexels-photo-1596445.jpeg?auto=compress&cs=tinysrgb&w=800",
-    "https://images.pexels.com/photos/6646919/pexels-photo-6646919.jpeg?auto=compress&cs=tinysrgb&w=800",
-    "https://images.pexels.com/photos/247878/pexels-photo-247878.jpeg?auto=compress&cs=tinysrgb&w=800",
-    "https://images.pexels.com/photos/247881/pexels-photo-247881.jpeg?auto=compress&cs=tinysrgb&w=800",
-  ];
+  // Image helper function to get proper player image URL
+  const getPlayerImageUrl = (photoUrl: string | null): string => {
+    if (!photoUrl || photoUrl === 'null' || photoUrl === 'undefined' || photoUrl.trim() === "") {
+      return buildUrl('/api/v1/player/profile/default.png');
+    }
+    
+    // Extract filename from photo_url
+    const filename = photoUrl.split('/').pop() || 'default.png';
+    
+    // Build the image URL using the player profile endpoint
+    return buildUrl(`/api/v1/player/profile/${filename}`);
+  };
 
-  const randomDemoImage = useMemo(() => {
-    return demoImages[Math.floor(Math.random() * demoImages.length)];
-  }, []);
-
-  const imageUrl = livePlayer.photo_url && livePlayer.photo_url !== "null" && livePlayer.photo_url.trim() !== ""
-    ? buildUrl(livePlayer.photo_url)
-    : randomDemoImage;
+  const imageUrl = useMemo(() => {
+    return getPlayerImageUrl(livePlayer.photo_url);
+  }, [livePlayer.photo_url]);
 
   const [soldList, setSoldList] = useState<any[]>([]);
   const playerId = String((livePlayer as any).id || new URLSearchParams(window.location.search).get('player_id') || '').trim();
@@ -391,31 +392,32 @@ export const AdminPlayerImage: React.FC<AdminPlayerImageProps> = ({ player, onCl
   }, [basePriceNum, bidAmount, livePlayer, playerId]);
 
   return (
-    <div className="fixed inset-0 bg-gradient-to-br from-purple-900 via-indigo-800 to-blue-900 flex items-center justify-center z-50 p-4">
-      <div className="w-full h-full max-w-[98vw] max-h-[96vh] grid grid-rows-[1fr_auto] gap-4 rounded-3xl overflow-hidden">
+    <div className="fixed inset-0 bg-gradient-to-br from-purple-900 via-indigo-800 to-blue-900 flex items-center justify-center z-50 p-2">
+      <div className="w-full h-full max-w-[98vw] max-h-[96vh] grid grid-rows-[1fr_auto] gap-2 rounded-3xl overflow-hidden">
         
         {/* Main Content Area */}
-        <div className="grid grid-cols-[320px_1fr] gap-4 h-full">
-          {/* Left Sidebar - Sold List (Scrollable) */}
-          <aside className="bg-gradient-to-b from-indigo-700/80 to-blue-700/80 text-white p-5 rounded-2xl shadow-2xl border border-white/20 flex flex-col">
+        <div className="grid grid-cols-[250px_1fr_280px] gap-2 h-full overflow-hidden">
+          
+          {/* Left Column - Sold List (Reduced Width) */}
+          <div className="bg-gradient-to-b from-indigo-700/80 to-blue-700/80 text-white rounded-2xl p-3 shadow-2xl border border-white/20 flex flex-col">
             <div className="flex-1 flex flex-col">
-              <div className="text-xl font-bold mb-4 text-white/90">Sold List</div>
-              <div className="space-y-3 flex-1 overflow-y-auto pr-2 custom-scrollbar">
+              <h2 className="text-lg font-bold mb-3 text-white/90 border-b border-white/20 pb-2">Sold Players</h2>
+              <div className="space-y-2 flex-1 overflow-y-auto pr-1 custom-scrollbar">
                 {soldList.length === 0 ? (
-                  <div className="text-sm opacity-80 text-center py-8">No sold players yet.</div>
+                  <div className="text-sm opacity-80 text-center py-6">No sold players yet.</div>
                 ) : (
                   soldList.map((s, idx) => (
-                    <div key={`${s.playerId}-${s.teamId}-${idx}`} className="bg-white/10 rounded-xl p-3 hover:bg-white/15 transition-all duration-200">
+                    <div key={`${s.playerId}-${s.teamId}-${idx}`} className="bg-white/10 rounded-lg p-2 hover:bg-white/15 transition-all duration-200 border border-white/10">
                       <div className="flex items-center justify-between">
                         <div className="flex-1 min-w-0">
-                          <div className="text-sm font-semibold truncate text-white">
+                          <div className="text-xs font-semibold truncate text-white">
                             {s.playerName || 'Unknown Player'}
                           </div>
-                          <div className="text-xs text-white/70 truncate">
+                          <div className="text-[10px] text-white/70 truncate">
                             → {s.teamName || 'Unknown Team'}
                           </div>
                         </div>
-                        <div className="text-sm font-bold ml-3 flex-shrink-0 text-green-300">
+                        <div className="text-xs font-bold ml-2 flex-shrink-0 text-green-300">
                           ৳{s.amount || 0}
                         </div>
                       </div>
@@ -424,69 +426,57 @@ export const AdminPlayerImage: React.FC<AdminPlayerImageProps> = ({ player, onCl
                 )}
               </div>
             </div>
-            <div className="pt-4">
-              <button 
-                onClick={onClose} 
-                className="w-full bg-white/90 hover:bg-white text-indigo-700 font-bold py-3 rounded-xl shadow-lg transition-all duration-200 hover:scale-105"
-              >
-                <div className="flex items-center justify-center gap-2">
-                  <X className="h-5 w-5" /> Close
-                </div>
-              </button>
-            </div>
-          </aside>
+          </div>
 
-          {/* Right Section - Image and Info */}
-          <section className="grid grid-cols-[65%_35%] gap-4 h-full">
-            {/* Image Section - Perfect Square */}
-            <div className="bg-gradient-to-br from-blue-500/20 to-indigo-600/20 rounded-2xl p-4 flex items-center justify-center shadow-2xl border border-white/20">
-              <div className="relative w-full h-full max-w-[500px] max-h-[500px] aspect-square rounded-2xl overflow-hidden shadow-2xl border-4 border-white/90 bg-white/10">
-                <img
-                  src={imageUrl}
-                  alt={livePlayer.name || livePlayer.player_name || "Player"}
-                  className="w-full h-full object-cover"
-                  onError={(e) => {
-                    e.currentTarget.src = randomDemoImage;
-                  }}
-                />
-                <div className="absolute top-4 left-4 w-20 h-20 bg-white/20 rounded-full blur-xl pointer-events-none"></div>
-              </div>
+          {/* Middle Column - Player Image (Fixed to stay within frame) */}
+          <div className="bg-gradient-to-br from-blue-500/20 to-indigo-600/20 rounded-2xl p-1 flex items-center justify-center shadow-2xl border border-white/20 overflow-hidden">
+            <div className="relative w-full h-full flex items-center justify-center">
+              <img
+                src={imageUrl}
+                alt={livePlayer.name || livePlayer.player_name || "Player"}
+                className="w-auto h-auto max-w-full max-h-full object-contain"
+                onError={(e) => {
+                  e.currentTarget.src = buildUrl('/api/v1/player/profile/default.png');
+                }}
+              />
+            </div>
+          </div>
+
+          {/* Right Column - Player Info (Reduced Width) */}
+          <div className="bg-white/95 backdrop-blur-md rounded-2xl p-4 shadow-2xl border border-white/20 flex flex-col">
+            {/* Player Name - Big and Centered */}
+            <div className="text-center mb-4">
+              <h1 className="text-2xl lg:text-3xl font-extrabold bg-clip-text text-transparent bg-gradient-to-r from-indigo-600 via-fuchsia-600 to-purple-600 drop-shadow-lg">
+                {livePlayer.name || livePlayer.player_name || "Unknown Player"}
+              </h1>
+              <div className="h-1 rounded-full mx-auto w-20 bg-gradient-to-r from-indigo-500 via-fuchsia-500 to-purple-500 opacity-80 mt-2"></div>
             </div>
 
-            {/* Info Section - Smaller Width */}
-            <div className="bg-white/95 backdrop-blur-md rounded-2xl p-4 shadow-2xl border border-white/20 flex flex-col">
-              <div className="flex-1 flex flex-col justify-center">
-                <h2 className="text-2xl lg:text-3xl font-extrabold text-center tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-indigo-600 via-fuchsia-600 to-purple-600 drop-shadow-[0_3px_10px_rgba(99,102,241,0.45)] mb-3">
-                  {livePlayer.name || livePlayer.player_name || "Unknown Player"}
-                </h2>
-                <div className="h-1 rounded-full mx-auto w-24 bg-gradient-to-r from-indigo-500 via-fuchsia-500 to-purple-500 opacity-80 mb-4" />
-
-                <div className="space-y-3">
-                  <InfoCard label="Category" value={livePlayer.category || "N/A"} />
-                  <InfoCard label="Base Price" value={`৳${basePriceNum}`} highlight />
-                  <InfoCard label="Current Bid" value={`৳${bidAmount}`} />
-                  <InfoCard label="Total Price" value={`৳${currentPrice}`} highlight />
-                  <InfoCard label="Start Position" value={getStartPositionLabel(livePlayer.start_players)} />
-                </div>
-              </div>
+            <div className="space-y-2 flex-1 overflow-y-auto pr-1 custom-scrollbar">
+              <InfoCard label="Category" value={livePlayer.category || "N/A"} />
+              <InfoCard label="Base Price" value={`৳${basePriceNum.toLocaleString()}`} highlight />
+              <InfoCard label="Current Bid" value={`৳${bidAmount.toLocaleString()}`} />
+              <InfoCard label="Total Price" value={`৳${currentPrice.toLocaleString()}`} highlight />
+              <InfoCard label="Start Position" value={getStartPositionLabel(livePlayer.start_players)} />
             </div>
-          </section>
+
+            
+          </div>
         </div>
 
-        {/* Footer Section - Teams Overview (Full Width) */}
-        <div className="bg-gradient-to-br from-blue-600/40 to-indigo-700/40 rounded-2xl p-4 shadow-2xl border border-white/20">
-          <div className="rounded-2xl border border-white/30 bg-white/10 backdrop-blur-md shadow-xl p-4 h-full">
-            <div className="text-white/90 font-bold text-lg mb-3 text-center">Teams Overview</div>
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3 max-h-40 overflow-y-auto custom-scrollbar pr-2">
+        {/* Footer - Teams Overview (Removed title and made fields larger) */}
+        <div className="bg-gradient-to-br from-blue-600/40 to-indigo-700/40 rounded-2xl p-3 shadow-2xl border border-white/20">
+          <div className="rounded-xl border border-white/30 bg-white/10 backdrop-blur-md shadow-xl p-3 h-full">
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-2 max-h-24 overflow-y-auto custom-scrollbar pr-1">
               {teamDistributions.length === 0 ? (
-                <div className="text-white/80 text-sm col-span-full text-center py-8">No teams found.</div>
+                <div className="text-white/80 text-sm col-span-full text-center py-4">No teams found.</div>
               ) : (
                 teamDistributions.map((t:any) => (
                   <div 
                     key={t.teamId} 
-                    className="rounded-xl bg-gradient-to-br from-indigo-500/20 to-blue-500/20 border border-white/30 hover:border-white/60 transition-all duration-200 shadow-md p-3 hover:scale-105 min-h-20"
+                    className="rounded-lg bg-gradient-to-br from-indigo-500/20 to-blue-500/20 border border-white/30 hover:border-white/60 transition-all duration-200 shadow p-3 hover:scale-105 min-h-20"
                   >
-                    <div className="text-white font-semibold truncate mb-2 text-sm text-center">
+                    <div className="text-white font-bold truncate mb-2 text-sm text-center">
                       {t.teamName}
                     </div>
                     <div className="space-y-2">
@@ -510,15 +500,15 @@ export const AdminPlayerImage: React.FC<AdminPlayerImageProps> = ({ player, onCl
       {/* Custom Scrollbar Styles */}
       <style>{`
         .custom-scrollbar::-webkit-scrollbar {
-          width: 6px;
+          width: 4px;
         }
         .custom-scrollbar::-webkit-scrollbar-track {
           background: rgba(255, 255, 255, 0.1);
-          border-radius: 10px;
+          border-radius: 8px;
         }
         .custom-scrollbar::-webkit-scrollbar-thumb {
           background: rgba(255, 255, 255, 0.3);
-          border-radius: 10px;
+          border-radius: 8px;
         }
         .custom-scrollbar::-webkit-scrollbar-thumb:hover {
           background: rgba(255, 255, 255, 0.5);
@@ -534,17 +524,17 @@ const InfoCard: React.FC<{ label: string; value: string; highlight?: boolean }> 
   highlight,
 }) => (
   <div
-    className={`group p-3 rounded-xl transition-all duration-300 border ${
+    className={`group p-2 rounded-lg transition-all duration-300 border ${
       highlight
         ? "border-green-200/50 hover:bg-green-50/80 bg-green-50/40"
         : "border-indigo-200/50 hover:bg-indigo-50/80 bg-white/60"
-    } hover:shadow-lg hover:-translate-y-0.5`}
+    } hover:shadow-md hover:-translate-y-0.5`}
   >
     <p className={`text-xs font-bold mb-1 ${highlight ? "text-green-700" : "text-indigo-700"}`}>
       {label}
     </p>
     <p
-      className={`text-base font-bold transition-colors break-words ${
+      className={`text-sm font-bold transition-colors break-words ${
         highlight ? "text-green-800 group-hover:text-green-900" : "text-gray-800 group-hover:text-indigo-800"
       }`}
     >
@@ -563,6 +553,8 @@ export const AdminPlayerImagePage: React.FC = () => {
     base_price: searchParams.get("base_price") || 0,
     start_players: searchParams.get("start_players") || "",
     photo_url: searchParams.get("photo_url") || "",
+    id: searchParams.get("id") || "",
+    auction_player_id: searchParams.get("auction_player_id") || "",
   };
 
   return <AdminPlayerImage player={player} onClose={() => window.close()} />;
