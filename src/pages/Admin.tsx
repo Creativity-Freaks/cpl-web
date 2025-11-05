@@ -852,16 +852,17 @@ const Admin: React.FC = () => {
   }, []);
   // Section label mapping: A→Diamond, B→Platinum, etc.
   const SECTION_LABELS: Record<string, string> = {
-    'A': 'Diamond',
+    'A': 'Elite',
     'B': 'Platinum',
-    'C': 'Gold-I',
-    'D': 'Gold-II',
-    'E': 'Silver-I',
-    'F': 'Silver-II',
-    'G': 'Bronze-I',
-    'H': 'Bronze-II',
-    'I': 'Titanium-I',
-    'J': 'Titanium-II',
+    'C': 'Diamond',
+    'D': 'Gold-I',
+    'E': 'Gold-II',
+    'F': 'Silver-I',
+    'G': 'Silver-II',
+    'H': 'Bronze-I',
+    'I': 'Bronze-II',
+    'J': 'Titanium-I',
+    'K': 'Titanium-II',
   };
   // Build sections A..J with 5 players per section, ordered by highest base price
   // Special handling for STAR category: shows only one section with 5 players
@@ -871,22 +872,22 @@ const Admin: React.FC = () => {
     const toBasePrice = (p: any) => Number(p.base_price ?? p.basePrice ?? 0) || 0;
    
     // Special handling for STAR category
-    if (categoryLabel === 'STAR') {
-      // Filter players by start_players = 'A' (STAR position) only
-      const starPlayers = livePlayers
-        .filter((p: any) => {
-          const startPos = String(p.start_players || '').trim().toUpperCase();
-          return startPos === 'A' || startPos === 'STAR';
-        })
-        .sort((a: any, b: any) => toBasePrice(b) - toBasePrice(a));
-     
-      // Return single STAR section with up to 5 players
-      return [{
-        key: 'STAR',
-        label: 'STAR',
-        players: starPlayers.slice(0, perSection),
-      }];
-    }
+    if (categoryLabel === 'ELITE') {
+  // Filter players by start_players = 'A' (ELITE position) only
+  const elitePlayers = livePlayers
+    .filter((p: any) => {
+      const startPos = String(p.start_players || '').trim().toUpperCase();
+      return startPos === 'A' || startPos === 'ELITE';
+    })
+    .sort((a: any, b: any) => toBasePrice(b) - toBasePrice(a));
+
+  // Return single Elite section with up to 5 players
+  return [{
+    key: 'ELITE',
+    label: 'Elite Players',
+    players: elitePlayers.slice(0, perSection),
+  }];
+}
    
     // For other categories: Batter, Bowler, All-rounder, WK Batsman
     // Filter by category and sort by base_price (highest first)
@@ -1530,7 +1531,7 @@ const Admin: React.FC = () => {
                     <CardContent className="p-4 md:p-6">
                       <Label>Category</Label>
                       <Select value={liveCategory} onChange={e => setLiveCategory(e.target.value)}>
-                        {['STAR','Batter','Bowler','All-rounder','WK Batsman'].map(c => (
+                        {['Elite','Batter','Bowler','All-rounder','WK Batsman'].map(c => (
                           <option key={c} value={c}>{c}</option>
                         ))}
                       </Select>
