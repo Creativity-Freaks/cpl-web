@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState, useCallback } from "react";
 import { X } from "lucide-react";
-import { useSearchParams } from "react-router-dom"; // To read URL params
+import { useSearchParams } from "react-router-dom";
 import { buildUrl } from "../config/api";
 
 interface AdminPlayerImageProps {
@@ -35,9 +35,9 @@ export const AdminPlayerImage: React.FC<AdminPlayerImageProps> = ({ player, onCl
     if (!raw) return "N/A";
     const found = START_POSITION_OPTIONS.find(opt => opt.value.toUpperCase() === raw.toUpperCase());
     if (found) return found.label;
-    // If API may already send the label, return as-is
     return raw;
   };
+
   const demoImages = [
     "https://images.pexels.com/photos/2240844/pexels-photo-2240844.jpeg?auto=compress&cs=tinysrgb&w=800",
     "https://images.pexels.com/photos/1596445/pexels-photo-1596445.jpeg?auto=compress&cs=tinysrgb&w=800",
@@ -54,13 +54,37 @@ export const AdminPlayerImage: React.FC<AdminPlayerImageProps> = ({ player, onCl
     ? buildUrl(livePlayer.photo_url)
     : randomDemoImage;
 
-  // Sold list state - all sold players for the tournament
   const [soldList, setSoldList] = useState<any[]>([]);
   const playerId = String((livePlayer as any).id || new URLSearchParams(window.location.search).get('player_id') || '').trim();
+  const [teamDistributions, setTeamDistributions] = useState<any[]>([]);
+  const [auctionPlayers, setAuctionPlayers] = useState<any[]>([]);
+  const soldOrderStorageKey = useMemo(() => `sold_order_${tournamentId}`, [tournamentId]);
+  const soldAmountStorageKey = useMemo(() => `sold_amount_${tournamentId}`, [tournamentId]);
 
-  // Fetch all sold players for the tournament from second image endpoint
-  // Second image endpoint: /api/v1/admin/tournaments/{tournament_id}/teams
-  // This endpoint returns teams with players array, showing which players are sold to which teams
+  const readSoldOrder = useCallback((): Record<string, number> => {
+    try {
+      const raw = localStorage.getItem(soldOrderStorageKey) || '{}';
+      const parsed = JSON.parse(raw);
+      return typeof parsed === 'object' && parsed ? parsed : {};
+    } catch { return {}; }
+  }, [soldOrderStorageKey]);
+
+  const writeSoldOrder = useCallback((order: Record<string, number>) => {
+    try { localStorage.setItem(soldOrderStorageKey, JSON.stringify(order)); } catch {}
+  }, [soldOrderStorageKey]);
+
+  const readSoldAmountMap = useCallback((): Record<string, number> => {
+    try {
+      const raw = localStorage.getItem(soldAmountStorageKey) || '{}';
+      const parsed = JSON.parse(raw);
+      return typeof parsed === 'object' && parsed ? parsed : {};
+    } catch { return {}; }
+  }, [soldAmountStorageKey]);
+
+  const writeSoldAmountMap = useCallback((map: Record<string, number>) => {
+    try { localStorage.setItem(soldAmountStorageKey, JSON.stringify(map)); } catch {}
+  }, [soldAmountStorageKey]);
+
   const fetchAllSoldPlayers = useCallback(async (silent = false) => {
     if (!tournamentId) return;
     try {
@@ -72,8 +96,6 @@ export const AdminPlayerImage: React.FC<AdminPlayerImageProps> = ({ player, onCl
         headers["Authorization"] = `Bearer ${token}`;
       }
       
-      // Fetch from second image endpoint: /api/v1/admin/tournaments/{tournament_id}/teams
-      // This endpoint shows teams with their players array, indicating sold players
       const teamsResponse = await fetch(buildUrl(`/api/v1/admin/tournaments/${tournamentId}/teams`), {
         headers,
       });
@@ -81,14 +103,12 @@ export const AdminPlayerImage: React.FC<AdminPlayerImageProps> = ({ player, onCl
       if (teamsResponse.ok) {
         const teams = await teamsResponse.json();
         if (Array.isArray(teams)) {
-          // Extract all sold players from all teams
           const allSoldPlayers: any[] = [];
           
           teams.forEach((team: any) => {
             const teamId = team.id;
             const teamName = team.team_name || team.name || 'Unknown Team';
             
-            // If team has players array, those are the sold players for this team
             if (Array.isArray(team.players)) {
               team.players.forEach((player: any) => {
                 allSoldPlayers.push({
@@ -96,62 +116,30 @@ export const AdminPlayerImage: React.FC<AdminPlayerImageProps> = ({ player, onCl
                   playerName: player.name || player.player_name || 'Unknown Player',
                   teamId: teamId,
                   teamName: teamName,
-                  amount: 0, // Will fetch from first endpoint if needed
-                  timestamp: Date.now(),
+                  amount: 0,
+                  timestamp: 0,
                 });
               });
             }
           });
           
-          // Also fetch from first endpoint to get sold_price information
-          try {
-            const playersResponse = await fetch(buildUrl(`/api/v1/admin/auction/tournaments/${tournamentId}/players`), {
-              headers,
-            });
-            if (playersResponse.ok) {
-              const auctionPlayers = await playersResponse.json();
-              if (Array.isArray(auctionPlayers)) {
-                // Merge sold_price information
-                const soldWithPrice = allSoldPlayers.map((sold: any) => {
-                  const auctionPlayer = auctionPlayers.find((ap: any) => 
-                    String(ap.player_id || ap.id) === String(sold.playerId)
-                  );
-                  return {
-                    ...sold,
-                    amount: auctionPlayer?.sold_price || 0,
-                  };
-                });
-                
-                // Sort: current player at top, then by timestamp (newest first)
-                const currentPlayerId = String((livePlayer as any).id || playerId || '').trim();
-                const sorted = soldWithPrice.sort((a: any, b: any) => {
-                  // Current player first
-                  if (String(a.playerId) === currentPlayerId) return -1;
-                  if (String(b.playerId) === currentPlayerId) return 1;
-                  // Then by timestamp (newest first)
-                  return (b.timestamp || 0) - (a.timestamp || 0);
-                });
-                
-                setSoldList(sorted);
-                return;
-              }
-            }
-          } catch {}
-          
-          // If first endpoint fails, still show the list from second endpoint
-          const currentPlayerId = String((livePlayer as any).id || playerId || '').trim();
-          const sorted = allSoldPlayers.sort((a: any, b: any) => {
-            if (String(a.playerId) === currentPlayerId) return -1;
-            if (String(b.playerId) === currentPlayerId) return 1;
-            return (b.timestamp || 0) - (a.timestamp || 0);
+          const orderMap = readSoldOrder();
+          const amountMap = readSoldAmountMap();
+          const merged = allSoldPlayers.map((sold: any) => {
+            const ap = auctionPlayers.find((p: any) => String(p.player_id || p.id) === String(sold.playerId));
+            return {
+              ...sold,
+              amount: Number(amountMap[String(sold.playerId)] || ap?.sold_price || 0),
+              timestamp: Number(orderMap[String(sold.playerId)] || 0),
+            };
           });
+          const sorted = merged.sort((a: any, b: any) => (b.timestamp || 0) - (a.timestamp || 0));
           setSoldList(sorted);
           return;
         }
       }
     } catch (error) {
       if (!silent) console.error('Failed to fetch sold players:', error);
-      // Fallback to localStorage
       try {
         const allSold: any[] = [];
         for (let i = 0; i < localStorage.length; i++) {
@@ -165,19 +153,66 @@ export const AdminPlayerImage: React.FC<AdminPlayerImageProps> = ({ player, onCl
             } catch {}
           }
         }
-        // Sort by current player first
-        const currentPlayerId = String((livePlayer as any).id || playerId || '').trim();
-        const sorted = allSold.sort((a: any, b: any) => {
-          if (String(a.playerId) === currentPlayerId) return -1;
-          if (String(b.playerId) === currentPlayerId) return 1;
-          return (b.timestamp || 0) - (a.timestamp || 0);
-        });
+        const sorted = allSold.sort((a: any, b: any) => (b.timestamp || 0) - (a.timestamp || 0));
         setSoldList(sorted);
       } catch {}
     }
   }, [tournamentId, livePlayer, playerId]);
 
-  // Load existing from localStorage and fetch from API
+  const fetchAuctionPlayers = useCallback(async () => {
+    if (!tournamentId) return;
+    try {
+      const token = localStorage.getItem("auth_token");
+      const headers: HeadersInit = { "Content-Type": "application/json" };
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+      const res = await fetch(buildUrl(`/api/v1/admin/auction/tournaments/${tournamentId}/players`), { headers });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (Array.isArray(data)) setAuctionPlayers(data);
+    } catch {}
+  }, [tournamentId]);
+
+  const getCurrentAuctionPlayer = useCallback(() => {
+    const currentId = String((livePlayer as any).id || playerId || '').trim();
+    if (!currentId) return null;
+    const ap = auctionPlayers.find((p: any) => String(p.player_id || p.id) === currentId);
+    return ap || null;
+  }, [auctionPlayers, livePlayer, playerId]);
+
+  const getAuthHeaders = useCallback((): HeadersInit => {
+    const token = localStorage.getItem("auth_token");
+    const headers: HeadersInit = { "Content-Type": "application/json" };
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+    return headers;
+  }, []);
+
+  const fetchTeamDistributions = useCallback(async (silent = false) => {
+    if (!tournamentId) return;
+    try {
+      const token = localStorage.getItem("auth_token");
+      const headers: HeadersInit = { "Content-Type": "application/json" };
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+      const res = await fetch(buildUrl(`/api/v1/admin/dashboard/teams/${tournamentId}/player-distribution`), { headers });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (Array.isArray(data)) {
+        const normalized = data.map((item: any) => {
+          const payload = item?.data || item?.result || item?.payload || item || {};
+          return {
+            teamId: payload.team_id ?? item.team_id ?? item.id,
+            teamName: payload.team_name ?? item.team_name ?? item.name ?? 'Team',
+            currentCoins: Number(payload.current_coins ?? payload.team_coin ?? payload.teamCoins ?? payload.coins ?? 0) || 0,
+            totalCoins: Number(payload.total_coins ?? payload.totalCoins ?? 0) || 0,
+          };
+        });
+        const uniq = Array.from(new Map(normalized.map((t: any) => [String(t.teamId), t])).values());
+        setTeamDistributions(uniq);
+      }
+    } catch (e) {
+      if (!silent) console.error('Failed to load team distributions', e);
+    }
+  }, [tournamentId]);
+
   useEffect(() => {
     const currentPlayerId = String((livePlayer as any).id || playerId || '').trim();
     if (!currentPlayerId) return;
@@ -186,18 +221,17 @@ export const AdminPlayerImage: React.FC<AdminPlayerImageProps> = ({ player, onCl
       setBidAmount(Number.isFinite(b) ? b : 0);
     } catch { setBidAmount(0); }
     
-    // Fetch all sold players for tournament
     fetchAllSoldPlayers();
-  }, [playerId, tournamentId, livePlayer, fetchAllSoldPlayers]);
+    fetchAuctionPlayers();
+    fetchTeamDistributions();
+  }, [playerId, tournamentId, livePlayer, fetchAllSoldPlayers, fetchTeamDistributions]);
 
-  // Listen to broadcast updates
   useEffect(() => {
     let bc: BroadcastChannel | null = null;
     try {
       bc = new BroadcastChannel('auction-updates');
       bc.onmessage = (ev: MessageEvent) => {
         const data = ev.data;
-        // Handle player update - change the right part
         if (data && data.type === 'player-update' && data.payload) {
           const payload = data.payload;
           const newPlayer = {
@@ -211,9 +245,7 @@ export const AdminPlayerImage: React.FC<AdminPlayerImageProps> = ({ player, onCl
             auction_player_id: payload.auction_player_id,
           };
           setLivePlayer(newPlayer);
-          // Reset bid amount for new player
           setBidAmount(0);
-          // Update playerId for bid tracking
           const newPlayerId = String(payload.id || '');
           if (newPlayerId) {
             try {
@@ -222,13 +254,75 @@ export const AdminPlayerImage: React.FC<AdminPlayerImageProps> = ({ player, onCl
             } catch { setBidAmount(0); }
           }
         }
-        // Handle sold player - refresh sold list
         if (data && data.type === 'sold') {
-          // Refresh all sold players from API silently
-          // This will show the newly sold player in the history
-          fetchAllSoldPlayers(true);
+          const payload = data.payload || {};
+          const teamId = payload.teamId || payload.sold_to_team_id;
+          const teamName = payload.teamName || payload.team_name || '';
+          const amount = Number(payload.amount || payload.sold_price || currentPrice || 0);
+
+          const ap = getCurrentAuctionPlayer();
+          if (ap && teamId) {
+            const auctionPlayerId = ap.auction_player_id || ap.id;
+            (async () => {
+              try {
+                await fetch(buildUrl(`/api/v1/admin/auction/assign-player/${auctionPlayerId}`), {
+                  method: 'PUT',
+                  headers: getAuthHeaders(),
+                  body: JSON.stringify({ sold_price: amount, sold_to_team_id: teamId }),
+                });
+              } catch {}
+              const now = Date.now();
+              const order = readSoldOrder();
+              order[String(ap.player_id || ap.id)] = now;
+              writeSoldOrder(order);
+              const amountMap = readSoldAmountMap();
+              amountMap[String(ap.player_id || ap.id)] = amount;
+              writeSoldAmountMap(amountMap);
+              setSoldList(prev => {
+                const withoutDup = prev.filter(x => String(x.playerId) !== String(ap.player_id || ap.id));
+                return [
+                  {
+                    playerId: ap.player_id || ap.id,
+                    playerName: livePlayer.name || livePlayer.player_name || 'Unknown Player',
+                    teamId,
+                    teamName,
+                    amount,
+                    timestamp: now,
+                  },
+                  ...withoutDup,
+                ];
+              });
+              fetchAuctionPlayers();
+              fetchAllSoldPlayers(true);
+              try {
+                const bc = new BroadcastChannel('auction-updates');
+                bc.postMessage({ type: 'sold-committed', playerId: ap.player_id || ap.id, teamId, amount });
+                bc.close();
+              } catch {}
+            })();
+          } else {
+            const now = Date.now();
+            const order = readSoldOrder();
+            order[String((livePlayer as any).id)] = now;
+            writeSoldOrder(order);
+            const amountMap = readSoldAmountMap();
+            amountMap[String((livePlayer as any).id)] = amount;
+            writeSoldAmountMap(amountMap);
+            setSoldList(prev => [{
+              playerId: (livePlayer as any).id,
+              playerName: livePlayer.name || livePlayer.player_name || 'Unknown Player',
+              teamId,
+              teamName,
+              amount,
+              timestamp: now,
+            }, ...prev.filter(x => String(x.playerId) !== String((livePlayer as any).id))]);
+            try {
+              const bc = new BroadcastChannel('auction-updates');
+              bc.postMessage({ type: 'sold-committed', playerId: (livePlayer as any).id, teamId, amount });
+              bc.close();
+            } catch {}
+          }
         }
-        // Handle bid update
         if (data && data.type === 'bid') {
           const currentPlayerId = String((livePlayer as any).id || playerId || '');
           if (String(data.playerId) === currentPlayerId) {
@@ -236,35 +330,33 @@ export const AdminPlayerImage: React.FC<AdminPlayerImageProps> = ({ player, onCl
             setBidAmount(Number.isFinite(amt) ? amt : 0);
             try { 
               localStorage.setItem(`bid_${currentPlayerId}`, String(amt));
-              // Also store total price if provided
               if (data.totalPrice !== undefined) {
                 localStorage.setItem(`total_${currentPlayerId}`, String(data.totalPrice));
               }
             } catch {}
           }
         }
-        // Handle refresh request
         if (data && data.type === 'refresh') {
           fetchAllSoldPlayers(true);
+          fetchTeamDistributions(true);
         }
       };
     } catch {}
     return () => { try { bc && bc.close(); } catch {} };
-  }, [playerId, tournamentId, livePlayer, fetchAllSoldPlayers]);
+  }, [playerId, tournamentId, livePlayer, fetchAllSoldPlayers, fetchTeamDistributions]);
 
-  // Automatic background refresh for sold list
   useEffect(() => {
     if (!tournamentId) return;
     
     const refreshInterval = setInterval(() => {
-      // Silently refresh sold players list every 5 seconds
       fetchAllSoldPlayers(true);
+      fetchAuctionPlayers();
+      fetchTeamDistributions(true);
     }, 5000);
     
     return () => clearInterval(refreshInterval);
-  }, [tournamentId, fetchAllSoldPlayers]);
+  }, [tournamentId, fetchAllSoldPlayers, fetchTeamDistributions]);
 
-  // Also listen to storage events as a robustness fallback
   useEffect(() => {
     const handler = (e: StorageEvent) => {
       if (!e || !e.key) return;
@@ -282,7 +374,6 @@ export const AdminPlayerImage: React.FC<AdminPlayerImageProps> = ({ player, onCl
     return Number.isFinite(n) ? n : 0;
   }, [livePlayer.base_price, livePlayer.basePrice]);
   
-  // Calculate current price: use stored total if available, otherwise base + bid
   const currentPrice = useMemo(() => {
     const currentPlayerId = String((livePlayer as any).id || playerId || '').trim();
     if (currentPlayerId) {
@@ -296,47 +387,60 @@ export const AdminPlayerImage: React.FC<AdminPlayerImageProps> = ({ player, onCl
         }
       } catch {}
     }
-    // Fallback: base price + current bid amount
     return basePriceNum + (Number.isFinite(bidAmount) ? bidAmount : 0);
   }, [basePriceNum, bidAmount, livePlayer, playerId]);
 
   return (
-    <div className="fixed inset-0 bg-gradient-to-br from-purple-900 via-indigo-800 to-blue-900 flex items-center justify-center z-50 p-6">
-      <div className="w-full max-w-7xl h-full max-h-[90vh] grid grid-cols-[260px_1fr] gap-0 rounded-3xl overflow-hidden shadow-2xl backdrop-blur-md border border-white/20">
-        {/* Left Sidebar */}
-        <aside className="bg-gradient-to-b from-indigo-700/80 to-blue-700/80 text-white p-5 flex flex-col gap-4">
-          <div>
-            <div className="text-lg font-semibold mb-2">Sold List</div>
-            <div className="space-y-2 max-h-[70vh] overflow-y-auto pr-1">
-              {soldList.length === 0 ? (
-                <div className="text-sm opacity-80">No sold players yet.</div>
-              ) : (
-                soldList.map((s, idx) => (
-                  <div key={`${s.playerId}-${s.teamId}-${idx}`} className="bg-white/10 rounded-lg p-2">
-                    <div className="flex items-center justify-between mb-1">
-                      <div className="text-sm font-medium truncate flex-1 min-w-0">
-                        {s.playerName || 'Unknown Player'} <span className="text-white/60">--&gt;</span> <span className="text-white/90">{s.teamName || 'Unknown Team'}</span>
+    <div className="fixed inset-0 bg-gradient-to-br from-purple-900 via-indigo-800 to-blue-900 flex items-center justify-center z-50 p-4">
+      <div className="w-full h-full max-w-[98vw] max-h-[96vh] grid grid-rows-[1fr_auto] gap-4 rounded-3xl overflow-hidden">
+        
+        {/* Main Content Area */}
+        <div className="grid grid-cols-[320px_1fr] gap-4 h-full">
+          {/* Left Sidebar - Sold List (Scrollable) */}
+          <aside className="bg-gradient-to-b from-indigo-700/80 to-blue-700/80 text-white p-5 rounded-2xl shadow-2xl border border-white/20 flex flex-col">
+            <div className="flex-1 flex flex-col">
+              <div className="text-xl font-bold mb-4 text-white/90">Sold List</div>
+              <div className="space-y-3 flex-1 overflow-y-auto pr-2 custom-scrollbar">
+                {soldList.length === 0 ? (
+                  <div className="text-sm opacity-80 text-center py-8">No sold players yet.</div>
+                ) : (
+                  soldList.map((s, idx) => (
+                    <div key={`${s.playerId}-${s.teamId}-${idx}`} className="bg-white/10 rounded-xl p-3 hover:bg-white/15 transition-all duration-200">
+                      <div className="flex items-center justify-between">
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm font-semibold truncate text-white">
+                            {s.playerName || 'Unknown Player'}
+                          </div>
+                          <div className="text-xs text-white/70 truncate">
+                            → {s.teamName || 'Unknown Team'}
+                          </div>
+                        </div>
+                        <div className="text-sm font-bold ml-3 flex-shrink-0 text-green-300">
+                          ৳{s.amount || 0}
+                        </div>
                       </div>
-                      <div className="text-sm font-semibold ml-2 flex-shrink-0">৳{s.amount || 0}</div>
                     </div>
-                  </div>
-                ))
-              )}
+                  ))
+                )}
+              </div>
             </div>
-          </div>
-          <div className="mt-auto">
-            <button onClick={onClose} className="w-full bg-white/90 hover:bg-white text-indigo-700 font-semibold py-2.5 rounded-xl shadow-lg transition">
-              <div className="flex items-center justify-center gap-2"><X className="h-5 w-5" /> Close</div>
-            </button>
-          </div>
-        </aside>
+            <div className="pt-4">
+              <button 
+                onClick={onClose} 
+                className="w-full bg-white/90 hover:bg-white text-indigo-700 font-bold py-3 rounded-xl shadow-lg transition-all duration-200 hover:scale-105"
+              >
+                <div className="flex items-center justify-center gap-2">
+                  <X className="h-5 w-5" /> Close
+                </div>
+              </button>
+            </div>
+          </aside>
 
-        {/* Right Content (existing full layout) */}
-        <section className="bg-gradient-to-br from-blue-600/40 to-indigo-700/40 grid grid-cols-[2fr_1fr]">
-          <div className="flex items-center justify-center p-8 bg-gradient-to-br from-blue-500/20 to-indigo-600/20">
-            <div className="relative w-full h-full max-w-3xl max-h-[600px] flex items-center justify-center">
-              <div className="absolute inset-0 bg-gradient-to-br from-cyan-400/30 to-emerald-400/30 rounded-3xl blur-3xl -z-10 scale-95"></div>
-              <div className="relative w-full h-full rounded-3xl overflow-hidden shadow-2xl border-8 border-white/90 bg-white/10 backdrop-blur-sm">
+          {/* Right Section - Image and Info */}
+          <section className="grid grid-cols-[65%_35%] gap-4 h-full">
+            {/* Image Section - Perfect Square */}
+            <div className="bg-gradient-to-br from-blue-500/20 to-indigo-600/20 rounded-2xl p-4 flex items-center justify-center shadow-2xl border border-white/20">
+              <div className="relative w-full h-full max-w-[500px] max-h-[500px] aspect-square rounded-2xl overflow-hidden shadow-2xl border-4 border-white/90 bg-white/10">
                 <img
                   src={imageUrl}
                   alt={livePlayer.name || livePlayer.player_name || "Player"}
@@ -345,28 +449,81 @@ export const AdminPlayerImage: React.FC<AdminPlayerImageProps> = ({ player, onCl
                     e.currentTarget.src = randomDemoImage;
                   }}
                 />
-                <div className="absolute top-10 left-10 w-40 h-40 bg-white/20 rounded-full blur-3xl pointer-events-none"></div>
+                <div className="absolute top-4 left-4 w-20 h-20 bg-white/20 rounded-full blur-xl pointer-events-none"></div>
               </div>
             </div>
-          </div>
 
-          <div className="flex flex-col bg-white/95 backdrop-blur-md p-6 rounded-l-none rounded-r-3xl shadow-2xl border-l border-indigo-200/50 overflow-y-auto">
-            <div className="flex-1 flex flex-col justify-center space-y-6">
-              <h2 className="text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 to-purple-600 text-center tracking-tight">
-                {livePlayer.name || livePlayer.player_name || "Unknown Player"}
-              </h2>
+            {/* Info Section - Smaller Width */}
+            <div className="bg-white/95 backdrop-blur-md rounded-2xl p-4 shadow-2xl border border-white/20 flex flex-col">
+              <div className="flex-1 flex flex-col justify-center">
+                <h2 className="text-2xl lg:text-3xl font-extrabold text-center tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-indigo-600 via-fuchsia-600 to-purple-600 drop-shadow-[0_3px_10px_rgba(99,102,241,0.45)] mb-3">
+                  {livePlayer.name || livePlayer.player_name || "Unknown Player"}
+                </h2>
+                <div className="h-1 rounded-full mx-auto w-24 bg-gradient-to-r from-indigo-500 via-fuchsia-500 to-purple-500 opacity-80 mb-4" />
 
-              <div className="space-y-4">
-                <InfoCard label="Category" value={livePlayer.category || "N/A"} />
-                <InfoCard label="Base Price" value={`৳${basePriceNum}`} highlight />
-                <InfoCard label="Current Bid" value={`৳${bidAmount}`} />
-                <InfoCard label="Total Price" value={`৳${currentPrice}`} highlight />
-                <InfoCard label="Start Position" value={getStartPositionLabel(livePlayer.start_players)} />
+                <div className="space-y-3">
+                  <InfoCard label="Category" value={livePlayer.category || "N/A"} />
+                  <InfoCard label="Base Price" value={`৳${basePriceNum}`} highlight />
+                  <InfoCard label="Current Bid" value={`৳${bidAmount}`} />
+                  <InfoCard label="Total Price" value={`৳${currentPrice}`} highlight />
+                  <InfoCard label="Start Position" value={getStartPositionLabel(livePlayer.start_players)} />
+                </div>
               </div>
             </div>
+          </section>
+        </div>
+
+        {/* Footer Section - Teams Overview (Full Width) */}
+        <div className="bg-gradient-to-br from-blue-600/40 to-indigo-700/40 rounded-2xl p-4 shadow-2xl border border-white/20">
+          <div className="rounded-2xl border border-white/30 bg-white/10 backdrop-blur-md shadow-xl p-4 h-full">
+            <div className="text-white/90 font-bold text-lg mb-3 text-center">Teams Overview</div>
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3 max-h-40 overflow-y-auto custom-scrollbar pr-2">
+              {teamDistributions.length === 0 ? (
+                <div className="text-white/80 text-sm col-span-full text-center py-8">No teams found.</div>
+              ) : (
+                teamDistributions.map((t:any) => (
+                  <div 
+                    key={t.teamId} 
+                    className="rounded-xl bg-gradient-to-br from-indigo-500/20 to-blue-500/20 border border-white/30 hover:border-white/60 transition-all duration-200 shadow-md p-3 hover:scale-105 min-h-20"
+                  >
+                    <div className="text-white font-semibold truncate mb-2 text-sm text-center">
+                      {t.teamName}
+                    </div>
+                    <div className="space-y-2">
+                      <div className="flex justify-between items-center">
+                        <span className="text-white/80 text-xs">Current:</span>
+                        <span className="text-green-300 font-bold text-sm">৳{t.currentCoins.toLocaleString()}</span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-white/80 text-xs">Total:</span>
+                        <span className="text-blue-300 font-bold text-sm">৳{t.totalCoins.toLocaleString()}</span>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
           </div>
-        </section>
+        </div>
       </div>
+
+      {/* Custom Scrollbar Styles */}
+      <style>{`
+        .custom-scrollbar::-webkit-scrollbar {
+          width: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+          background: rgba(255, 255, 255, 0.1);
+          border-radius: 10px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+          background: rgba(255, 255, 255, 0.3);
+          border-radius: 10px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+          background: rgba(255, 255, 255, 0.5);
+        }
+      `}</style>
     </div>
   );
 };
@@ -377,18 +534,18 @@ const InfoCard: React.FC<{ label: string; value: string; highlight?: boolean }> 
   highlight,
 }) => (
   <div
-    className={`group p-4 rounded-2xl transition-all duration-300 border ${
+    className={`group p-3 rounded-xl transition-all duration-300 border ${
       highlight
-        ? "border-green-100/50 hover:bg-green-50/50"
-        : "border-indigo-100/50 hover:bg-indigo-50/50"
-    } hover:shadow-lg hover:-translate-y-1`}
+        ? "border-green-200/50 hover:bg-green-50/80 bg-green-50/40"
+        : "border-indigo-200/50 hover:bg-indigo-50/80 bg-white/60"
+    } hover:shadow-lg hover:-translate-y-0.5`}
   >
-    <p className={`text-sm font-semibold mb-1 ${highlight ? "text-green-600" : "text-indigo-600"}`}>
+    <p className={`text-xs font-bold mb-1 ${highlight ? "text-green-700" : "text-indigo-700"}`}>
       {label}
     </p>
     <p
-      className={`text-lg font-medium transition-colors break-words ${
-        highlight ? "text-green-700 group-hover:text-green-800" : "text-gray-700 group-hover:text-indigo-700"
+      className={`text-base font-bold transition-colors break-words ${
+        highlight ? "text-green-800 group-hover:text-green-900" : "text-gray-800 group-hover:text-indigo-800"
       }`}
     >
       {value}
@@ -396,7 +553,6 @@ const InfoCard: React.FC<{ label: string; value: string; highlight?: boolean }> 
   </div>
 );
 
-// === Standalone Page to Read URL Params ===
 export const AdminPlayerImagePage: React.FC = () => {
   const [searchParams] = useSearchParams();
 
