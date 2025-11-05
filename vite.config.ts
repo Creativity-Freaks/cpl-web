@@ -13,20 +13,16 @@ export default defineConfig(({ mode }) => ({
     rollupOptions: {
       output: {
         manualChunks(id) {
-          if (id.includes("node_modules")) {
-            if (id.includes("react") || id.includes("react-dom"))
-              return "react-vendor";
-            return "vendor";
+          if (id.includes('node_modules')) {
+            return id.toString().split('node_modules/')[1].split('/')[0].toString();
           }
-        },
-      },
-    },
+        }
+      }
+    }
   },
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
-      react: path.resolve("./node_modules/react"), // ✅ fix duplication
-      "react-dom": path.resolve("./node_modules/react-dom"), // ✅ fix duplication
     },
   },
 }));
