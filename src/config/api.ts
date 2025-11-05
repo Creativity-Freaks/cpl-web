@@ -4,7 +4,8 @@ export const API_BASE = "http://192.168.0.117:8000";
 
 // FastAPI default OAuth2PasswordRequestForm token route is usually "/token".
 // If your backend exposes a different path, change it here once.
-export const LOGIN_URL = "/token";
+// OAuth2 token endpoint (FastAPI default is usually /token, but backend exposes /api/v1/token)
+export const LOGIN_URL = "/api/v1/token";
 
 // Small utility to safely join base + path (avoids double slashes)
 export function buildUrl(path: string): string {

@@ -1,12 +1,72 @@
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Play } from "lucide-react";
-import teamImage from "@/assets/team-celebration.jpg";
+import { useEffect, useMemo, useState } from "react";
+import { fetchAllTournaments, fetchTournamentImages, tournamentImageUrl, type UITournament } from "@/lib/api";
 
 const GalleryPage = () => {
-  const images = Array(12).fill(teamImage);
-  const videos = Array(6).fill({ title: "CPL Highlights", thumbnail: teamImage });
+  const [tournaments, setTournaments] = useState<UITournament[]>([]);
+  const [selectedTournamentId, setSelectedTournamentId] = useState<string | null>(null);
+  const [images, setImages] = useState<string[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [videos, setVideos] = useState<string[]>([]); // store YouTube URLs
+
+  // Load tournaments and default
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const list = await fetchAllTournaments();
+        if (!mounted) return;
+        setTournaments(list);
+        const live = list.find((t) => t.status === "Live");
+        const upcoming = list.find((t) => t.status === "Upcoming");
+        const chosen = live || upcoming || list[0];
+        if (chosen) setSelectedTournamentId(chosen.id);
+      } catch {
+        /* noop */
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  // Load gallery images for selected tournament
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      if (!selectedTournamentId) return;
+      try {
+        setLoading(true);
+        const files = await fetchTournamentImages(selectedTournamentId);
+        if (!mounted) return;
+        setImages(files.map((f) => f.url));
+      } catch {
+        if (mounted) setImages([]);
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, [selectedTournamentId]);
+
+  // Load videos from localStorage (managed in Admin upload tab)
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("gallery_videos") || "[]";
+      const arr = JSON.parse(raw);
+      if (Array.isArray(arr)) setVideos(arr.map(String));
+    } catch {
+      setVideos([]);
+    }
+  }, []);
+
+  const selectedTournament = useMemo(() => tournaments.find((t) => t.id === selectedTournamentId) || null, [tournaments, selectedTournamentId]);
 
   return (
     <div className="min-h-screen">
@@ -20,6 +80,24 @@ const GalleryPage = () => {
             Relive the best moments from CPL history
           </p>
 
+          {/* Tournament selector */}
+          <div className="mt-6 mb-10 flex items-center justify-center animate-fade-in-up" style={{ animationDelay: "0.08s" }}>
+            <div className="w-full max-w-md">
+              <Select value={selectedTournamentId ?? undefined} onValueChange={(v) => setSelectedTournamentId(v)}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select tournament" />
+                </SelectTrigger>
+                <SelectContent>
+                  {tournaments.map((t) => (
+                    <SelectItem value={t.id} key={t.id}>
+                      {t.title} {t.year ? `(${t.year})` : ""}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
           <Tabs defaultValue="images" className="animate-fade-in-up">
             <TabsList className="grid w-full max-w-md mx-auto grid-cols-2 mb-12">
               <TabsTrigger value="images">Images</TabsTrigger>
@@ -27,50 +105,62 @@ const GalleryPage = () => {
             </TabsList>
             
             <TabsContent value="images">
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                {images.map((img, index) => (
-                  <div 
-                    key={index} 
-                    className="relative rounded-xl overflow-hidden shadow-lg hover:shadow-glow transition-all duration-300 hover:-translate-y-2 aspect-video group animate-scale-in"
-                    style={{ animationDelay: `${index * 0.05}s` }}
-                  >
-                    <img 
-                      src={img} 
-                      alt={`Gallery ${index + 1}`}
-                      className="w-full h-full object-cover"
-                    />
-                    <div className="absolute inset-0 bg-gradient-to-t from-primary/90 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end">
-                      <p className="text-primary-foreground font-medium p-4">CPL Moment {index + 1}</p>
+              {loading ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                  {Array.from({ length: 8 }).map((_, i) => (
+                    <div key={i} className="rounded-xl h-48 bg-muted animate-pulse" />
+                  ))}
+                </div>
+              ) : images.length === 0 ? (
+                <div className="text-center text-muted-foreground">No images found for this tournament.</div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                  {images.map((img, index) => (
+                    <div 
+                      key={index} 
+                      className="relative rounded-xl overflow-hidden shadow-lg hover:shadow-glow transition-all duration-300 hover:-translate-y-2 aspect-video group animate-scale-in"
+                      style={{ animationDelay: `${index * 0.05}s` }}
+                    >
+                      <img 
+                        src={img} 
+                        alt={`Gallery ${index + 1}`}
+                        className="w-full h-full object-cover"
+                      />
+                      <div className="absolute inset-0 bg-gradient-to-t from-primary/90 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end">
+                        <p className="text-primary-foreground font-medium p-4">{selectedTournament?.title} {selectedTournament?.year ? `(${selectedTournament?.year})` : ''}</p>
+                      </div>
                     </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
             </TabsContent>
             
             <TabsContent value="videos">
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {videos.map((video, index) => (
-                  <div 
-                    key={index} 
-                    className="relative rounded-xl overflow-hidden shadow-lg hover:shadow-glow transition-all duration-300 hover:-translate-y-2 aspect-video group animate-scale-in cursor-pointer"
-                    style={{ animationDelay: `${index * 0.1}s` }}
-                  >
-                    <img 
-                      src={video.thumbnail} 
-                      alt={video.title}
-                      className="w-full h-full object-cover"
-                    />
-                    <div className="absolute inset-0 bg-primary/40 flex items-center justify-center">
-                      <div className="w-16 h-16 rounded-full bg-accent hover:bg-accent-glow flex items-center justify-center shadow-accent transition-transform group-hover:scale-110">
-                        <Play className="h-8 w-8 text-accent-foreground ml-1" fill="currentColor" />
+              {videos.length === 0 ? (
+                <div className="text-center text-muted-foreground">No videos added yet. Add YouTube links from Admin → Gallery Upload.</div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {videos.map((url, index) => {
+                    const ytIdMatch = url.match(/(?:v=|youtu\.be\/)([\w-]+)/);
+                    const id = ytIdMatch ? ytIdMatch[1] : null;
+                    return (
+                      <div key={index} className="rounded-xl overflow-hidden shadow-lg animate-scale-in" style={{ animationDelay: `${index * 0.06}s` }}>
+                        {id ? (
+                          <iframe
+                            className="w-full aspect-video"
+                            src={`https://www.youtube.com/embed/${id}`}
+                            title={`YouTube video ${index + 1}`}
+                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                            allowFullScreen
+                          />
+                        ) : (
+                          <a href={url} target="_blank" rel="noreferrer" className="block p-6 text-center text-sm text-blue-600 hover:underline">Open video</a>
+                        )}
                       </div>
-                    </div>
-                    <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-primary to-transparent">
-                      <h3 className="text-primary-foreground font-semibold">{video.title}</h3>
-                    </div>
-                  </div>
-                ))}
-              </div>
+                    );
+                  })}
+                </div>
+              )}
             </TabsContent>
           </Tabs>
         </div>

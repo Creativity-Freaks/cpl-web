@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Trophy, Users, DollarSign, LogOut, Activity } from 'lucide-react';
 import DatePicker from 'react-datepicker';
 import "react-datepicker/dist/react-datepicker.css";
@@ -11,47 +11,47 @@ import { API_BASE, LOGIN_URL, buildUrl } from '../config/api';
 const API_TIMEOUT = 10000;
 // --- API HELPER ---
 const api = {
-  async request(url: string, options: RequestInit = {}) {
-    const controller = new AbortController();
-    const id = setTimeout(() => controller.abort(), API_TIMEOUT);
-    const token = localStorage.getItem("auth_token");
-    const headers: HeadersInit = {
-      "Content-Type": "application/json",
-      ...options.headers,
-    };
-    if (token && !url.includes("/token")) {
-      headers["Authorization"] = `Bearer ${token}`;
-    }
+async request(url: string, options: RequestInit = {}) {
+const controller = new AbortController();
+const id = setTimeout(() => controller.abort(), API_TIMEOUT);
+const token = localStorage.getItem("auth_token");
+const headers: HeadersInit = {
+  "Content-Type": "application/json",
+  ...options.headers,
+};
+if (token && !url.includes("/token")) {
+  headers["Authorization"] = `Bearer ${token}`;
+}
+try {
+  const response = await fetch(buildUrl(url), {
+    ...options,
+    headers,
+    signal: controller.signal,
+  });
+  clearTimeout(id);
+  const text = await response.text();
+  console.log(`API ${options.method || 'GET'} ${url} →`, response.status, text);
+  if (!response.ok) {
+    let errMsg = "Request failed";
     try {
-      const response = await fetch(buildUrl(url), {
-        ...options,
-        headers,
-        signal: controller.signal,
-      });
-      clearTimeout(id);
-      const text = await response.text();
-      console.log(`API ${options.method || 'GET'} ${url} →`, response.status, text);
-      if (!response.ok) {
-        let errMsg = "Request failed";
-        try {
-          const err = JSON.parse(text);
-          errMsg = err.detail?.[0]?.msg || err.detail || err.message || text;
-        } catch {}
-        throw new Error(errMsg);
-      }
-      try {
-        return JSON.parse(text);
-      } catch {
-        return text;
-      }
-    } catch (error: any) {
-      throw error;
-    }
-  },
-  get: (url: string) => api.request(url),
-  post: (url: string, data: any) => api.request(url, { method: "POST", body: JSON.stringify(data) }),
-  put: (url: string, data: any) => api.request(url, { method: "PUT", body: JSON.stringify(data) }),
-  delete: (url: string) => api.request(url, { method: "DELETE" }),
+      const err = JSON.parse(text);
+      errMsg = err.detail?.[0]?.msg || err.detail || err.message || text;
+    } catch {}
+    throw new Error(errMsg);
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
+} catch (error: any) {
+  throw error;
+}
+},
+get: (url: string) => api.request(url),
+post: (url: string, data: any) => api.request(url, { method: "POST", body: JSON.stringify(data) }),
+put: (url: string, data: any) => api.request(url, { method: "PUT", body: JSON.stringify(data) }),
+delete: (url: string) => api.request(url, { method: "DELETE" }),
 };
 // --- IMAGE HELPER ---
 const getPlayerImageUrl = (photoUrl: string | null): string => {
@@ -835,7 +835,7 @@ const Admin: React.FC = () => {
   const getSectionedPlayers = useCallback((categoryLabel: string) => {
     const perSection = 5;
     const toBasePrice = (p: any) => Number(p.base_price ?? p.basePrice ?? 0) || 0;
-
+   
     // Special handling for STAR category
     if (categoryLabel === 'STAR') {
       // Filter players by start_players = 'A' (STAR position) only
@@ -845,11 +845,11 @@ const Admin: React.FC = () => {
           return startPos === 'A' || startPos === 'STAR';
         })
         .sort((a: any, b: any) => toBasePrice(b) - toBasePrice(a));
-
-      // Return single ELITE section with up to 5 players
+     
+      // Return single STAR section with up to 5 players
       return [{
         key: 'STAR',
-        label: 'ELITE STAR Players',
+        label: 'STAR',
         players: starPlayers.slice(0, perSection),
       }];
     }
@@ -1429,7 +1429,7 @@ const Admin: React.FC = () => {
                     <CardContent className="p-4 md:p-6">
                       <Label>Category</Label>
                       <Select value={liveCategory} onChange={e => setLiveCategory(e.target.value)}>
-                        {['Elite','Batter','Bowler','All-rounder','WK Batsman'].map(c => (
+                        {['STAR','Batter','Bowler','All-rounder','WK Batsman'].map(c => (
                           <option key={c} value={c}>{c}</option>
                         ))}
                       </Select>

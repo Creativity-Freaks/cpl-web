@@ -207,14 +207,20 @@ export const fetchTeamsByTournament = async (tournamentId: string): Promise<UITe
       short: String(team.short_name ?? team.team_code ?? ""),
       players: Number(team.players_count ?? team.player_count ?? 0),
     }));
-    // Always refresh player counts from the dedicated API per requirement
+    // Refresh counts using the per-team-per-tournament players endpoint (authoritative per requirement)
     const withCounts = await Promise.all(
       base.map(async (t) => {
         try {
-          const count = await getTeamPlayerCount(t.id);
-          return { ...t, players: Number(count || 0) };
+          const list = await getTeamPlayersByTournament(t.id, tournamentId);
+          return { ...t, players: Array.isArray(list) ? list.length : 0 };
         } catch {
-          return t; // fall back to existing value if count API fails
+          // Fallback to generic count endpoint if specific endpoint fails
+          try {
+            const count = await getTeamPlayerCount(t.id);
+            return { ...t, players: Number(count || 0) };
+          } catch {
+            return t;
+          }
         }
       })
     );
@@ -396,10 +402,15 @@ export const API_PATHS = {
 } as const;
 
 type JsonInit = Omit<RequestInit, "body"> & { body?: unknown };
-const ACCESS_TOKEN_KEY = "cpl_access_token";
+const ACCESS_TOKEN_KEY_PRIMARY = "cpl_access_token";
+const ACCESS_TOKEN_KEY_FALLBACK = "auth_token"; // used by Admin.tsx
 export function getAuthToken(): string | null {
   try {
-    return localStorage.getItem(ACCESS_TOKEN_KEY);
+    // Prefer the primary key, but fall back to Admin's key if present
+    return (
+      localStorage.getItem(ACCESS_TOKEN_KEY_PRIMARY) ||
+      localStorage.getItem(ACCESS_TOKEN_KEY_FALLBACK)
+    );
   } catch {
     return null;
   }
@@ -519,19 +530,92 @@ export function backgroundImageUrl(filename: string): string {
 }
 
 // Tournament images
-export async function uploadTournamentImage(file: File): Promise<unknown> {
+export async function uploadTournamentImage(file: File, tournamentId?: string | number): Promise<unknown> {
+  // Backend expects: POST /api/v1/upload/tounament/image?tounament_id={id}
+  // We'll be generous and also include a form field for broader compatibility.
   const fd = new FormData();
   fd.set("file", file);
+  if (tournamentId !== undefined) {
+    // Some backends read form-data, others read query param (with the misspelled key)
+    fd.set("tournament_id", String(tournamentId));
+  }
   const token = getAuthToken();
-  const res = await fetch(buildUrl(API_PATHS.uploadTournamentImage), { method: "POST", headers: token ? { Authorization: `Bearer ${token}` } : undefined, body: fd });
+  const url = tournamentId !== undefined
+    ? `${buildUrl(API_PATHS.uploadTournamentImage)}?tounament_id=${encodeURIComponent(String(tournamentId))}`
+    : buildUrl(API_PATHS.uploadTournamentImage);
+  const res = await fetch(url, { method: "POST", headers: token ? { Authorization: `Bearer ${token}` } : undefined, body: fd });
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
   return await res.json();
 }
-export async function listTournamentImageFiles(): Promise<unknown> {
-  return apiFetchJson(API_PATHS.listTournamentImages);
+export async function listTournamentImageFiles(tournamentId?: string): Promise<unknown> {
+  const path = tournamentId
+    ? `${API_PATHS.listTournamentImages}?tounament_id=${encodeURIComponent(tournamentId)}`
+    : API_PATHS.listTournamentImages;
+  return apiFetchJson(path);
 }
 export function tournamentImageUrl(filename: string): string {
-  return buildUrl(API_PATHS.getTournamentImage(filename));
+  const safe = encodeURIComponent(filename);
+  return buildUrl(API_PATHS.getTournamentImage(safe));
+}
+
+// Gallery: tournament images
+export type TournamentImageFile = { filename: string; url: string; id?: string; tournament_id?: string; year?: string };
+export async function fetchTournamentImages(tournamentId?: string): Promise<TournamentImageFile[]> {
+  try {
+    let raw: unknown;
+    try {
+      raw = await listTournamentImageFiles(tournamentId);
+    } catch (err) {
+      // If the API strictly requires tounament_id and rejects other shapes, or vice versa,
+      // retry without the param to get a superset and then filter locally.
+      try {
+        raw = await listTournamentImageFiles(undefined);
+      } catch {
+        raw = [];
+      }
+    }
+  type RawItem = { filename?: string; name?: string; file?: string; photo_url?: string; id?: string | number; tournament_id?: string | number; tournamentId?: string | number; tournament?: string | number; year?: string | number } | string;
+    // Accept a variety of server payload shapes
+    const extractArray = (val: unknown): RawItem[] => {
+      if (Array.isArray(val)) return val as RawItem[];
+      if (val && typeof val === 'object') {
+        const obj = val as Record<string, unknown>;
+        const keys = ["data", "files", "filenames", "results", "items", "response"];
+        for (const k of keys) {
+          const v = obj[k];
+          if (Array.isArray(v)) return v as RawItem[];
+        }
+      }
+      return [];
+    };
+    const arr: RawItem[] = extractArray(raw);
+    const norm: TournamentImageFile[] = arr
+      .map((it: RawItem) => {
+        const obj: { filename?: string; name?: string; file?: string; photo_url?: string; id?: string | number; tournament_id?: string | number; tournamentId?: string | number; tournament?: string | number; year?: string | number } = typeof it === 'string' ? { filename: it } : (it as Exclude<RawItem, string>);
+        const fileFromObj = obj?.filename ?? obj?.name ?? obj?.file;
+        const filenameRaw = String(fileFromObj ?? (typeof it === 'string' ? it : '') ?? "");
+        const fromPhotoUrl = obj?.photo_url ? extractFilename(String(obj.photo_url)) : undefined;
+        const filename = String(fromPhotoUrl ?? filenameRaw);
+        const tidRaw = obj?.tournament_id ?? obj?.tournamentId ?? obj?.tournament;
+        const tid = tidRaw !== undefined && tidRaw !== null && String(tidRaw) !== "" ? String(tidRaw) : undefined;
+        const yr = obj?.year !== undefined ? String(obj.year) : undefined;
+        const id = obj?.id !== undefined ? String(obj.id) : filename;
+        // Backend serves images via /api/v1/tounament/image/{filename}
+        const url = tournamentImageUrl(filename);
+        return { filename, url, id, tournament_id: tid, year: yr } as TournamentImageFile;
+      })
+      .filter((x) => x.filename);
+    if (!tournamentId) return norm;
+    const key = String(tournamentId);
+    // Filter by explicit t.tournament_id if present; otherwise try loose match by filename containing id or year
+    const byId = norm.filter((x) => x.tournament_id && String(x.tournament_id) === key);
+    if (byId.length > 0) return byId;
+    const loose = norm.filter((x) => x.filename.includes(key) || (x.year && x.year === key));
+    // If no match at all, return everything so users at least see uploads
+    return loose.length > 0 ? loose : norm;
+  } catch {
+    return [];
+  }
 }
 
 // Admin tournaments

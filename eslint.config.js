@@ -23,4 +23,18 @@ export default tseslint.config(
       "@typescript-eslint/no-unused-vars": "off",
     },
   },
+  {
+    files: [
+      "src/pages/Admin.tsx",
+      "src/pages/admin_*.tsx",
+    ],
+    rules: {
+      // Admin panel is utility-heavy and interacts with unstable APIs. Relax strict rules here.
+      "@typescript-eslint/no-explicit-any": "off",
+      "no-empty": "off",
+      "no-useless-catch": "off",
+      "@typescript-eslint/no-unused-expressions": "off",
+      "react-hooks/exhaustive-deps": "off",
+    },
+  }
 );

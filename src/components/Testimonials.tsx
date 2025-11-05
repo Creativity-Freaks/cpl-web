@@ -9,7 +9,7 @@ const Testimonials = () => {
       quote: "CPL gave us the platform to showcase our talent and build lifelong friendships. The competition was fierce but the memories are priceless!",
     },
     {
-      name: "Sadia Akter",
+      name: "Nabil Khan",
       role: "Player of the Tournament 2025",
       quote: "The organization and excitement of CPL is unmatched. Every match felt like a professional tournament. Can't wait for 2026!",
     },
