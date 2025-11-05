@@ -112,6 +112,18 @@ const toast = {
 success: (msg: string) => setToastMsg({type: 'success' as const, msg: `Success: ${msg}`}),
 error: (msg: string) => setToastMsg({type: 'error' as const, msg: `Error: ${msg}`}),
 };
+// Persisted blacklist of sold players by tournament so they never reappear in lists
+const soldBlacklistKey = (tid: number | null) => tid ? `sold_blacklist_${tid}` : '';
+const readSoldBlacklist = (): string[] => {
+  const key = soldBlacklistKey(auctionTournamentId);
+  if (!key) return [];
+  try { const arr = JSON.parse(localStorage.getItem(key) || '[]'); return Array.isArray(arr) ? arr.map(String) : []; } catch { return []; }
+};
+const writeSoldBlacklist = (list: string[]) => {
+  const key = soldBlacklistKey(auctionTournamentId);
+  if (!key) return;
+  try { localStorage.setItem(key, JSON.stringify(Array.from(new Set(list.map(String))))); } catch {}
+};
 useEffect(() => {
 if (toastMsg) {
 const timer = setTimeout(() => setToastMsg(null), 3000);
@@ -264,7 +276,15 @@ const fetchLivePlayers = async (silent = false) => {
       : [];
     // Remove duplicates by player ID
     normalized = [...new Map(normalized.map((item: any) => [item.id, item])).values()];
-    setLivePlayers(normalized);
+    // Filter out already sold by backend flag if available
+    let filtered = normalized.filter((p:any) => {
+      const soldTeam = Number((p as any).sold_to_team_id || 0);
+      return !soldTeam || soldTeam === 0;
+    });
+    // Apply local blacklist to ensure permanence even if backend lags
+    const blacklist = new Set(readSoldBlacklist());
+    filtered = filtered.filter((p:any) => !blacklist.has(String(p.id)));
+    setLivePlayers(filtered);
   } catch {
     setLivePlayers([]);
   } finally {
@@ -550,6 +570,25 @@ useEffect(() => {
     // Listen for refresh requests from other tabs
     bcRef.current.onmessage = (ev: MessageEvent) => {
       const data = ev.data;
+      // When a player is sold from the live player window, remove him from lists immediately
+      if (data && data.type === 'sold-committed') {
+        try {
+          const playerId = String(data.playerId || '');
+          if (playerId) {
+            setLivePlayers(prev => prev.filter((p:any) => String(p.id) !== playerId));
+            // Persist to blacklist so future fetches also exclude this player
+            const list = readSoldBlacklist();
+            list.push(playerId);
+            writeSoldBlacklist(list);
+            // Also clear any cached bid/total to avoid stale amounts lingering
+            try { localStorage.removeItem(`bid_${playerId}`); } catch {}
+            try { localStorage.removeItem(`total_${playerId}`); } catch {}
+            // Optionally show a quick success toast
+            toast.success('Player sold and removed from list');
+          }
+        } catch {}
+        return;
+      }
       if (data && data.type === 'refresh') {
         // Silently refresh data based on active section (pass true for silent mode)
         if (data.section === 'tournaments' || !data.section) {
@@ -749,11 +788,14 @@ const getSectionedPlayers = (categoryLabel: string) => {
   
   // For other categories: Batter, Bowler, All-rounder, WK Batsman
   // Filter by category and sort by base_price (highest first)
+  const blacklistSet = new Set(readSoldBlacklist());
   const categoryFiltered = livePlayers
     .filter((p: any) => {
       const playerCategory = getPlayerCategory(p);
       return playerCategory === normalizeCategory(categoryLabel);
     })
+    // Extra guard: filter out blacklisted (in case livePlayers wasn't refreshed yet)
+    .filter((p:any) => !blacklistSet.has(String(p.id)))
     .sort((a: any, b: any) => toBasePrice(b) - toBasePrice(a)); // Sort by base_price descending
   
   // Distribute players into sections based on base_price ranking
@@ -1088,11 +1130,12 @@ toast.success("Logged out");
       {/* === LIVE AUCTION SECTION === */}
       {activeSection === "live-auction" && (
         <>
-          <h1 className="text-3xl font-bold flex items-center gap-3 mb-6">
-            <Activity className="text-red-600" /> Live Auction
+          <h1 className="text-3xl md:text-4xl font-extrabold flex items-center gap-3 mb-6">
+            <span className="inline-flex items-center justify-center w-9 h-9 rounded-xl bg-gradient-to-br from-rose-500 to-orange-500 text-white shadow-lg"><Activity className="h-5 w-5" /></span>
+            <span className="bg-gradient-to-r from-indigo-600 via-purple-600 to-rose-600 bg-clip-text text-transparent">Live Auction</span>
           </h1>
-          <Card className="mb-6">
-            <CardContent>
+          <Card className="mb-6 border-0 shadow-xl bg-gradient-to-br from-white to-indigo-50/60">
+            <CardContent className="p-4 md:p-6">
               <div className="flex flex-col md:flex-row items-end justify-between gap-4">
                 <div className="w-full md:min-w-[260px]">
                   <Label>League / Tournament</Label>
@@ -1105,30 +1148,49 @@ toast.success("Logged out");
                 </div>
                 <div className="flex-1" />
                 <div className="flex justify-end">
-                  <Button className="bg-yellow-500 text-red-700" onClick={() => window.open('/settings', '_blank')}>Update Account</Button>
+                  <Button
+                    className="bg-gradient-to-r from-yellow-400 to-amber-500 text-red-800 font-semibold shadow-md hover:shadow-lg hover:from-yellow-500 hover:to-amber-600"
+                    onClick={async () => {
+                      if (!auctionTournamentId) { toast.error('Select a tournament first'); return; }
+                      try {
+                        await api.post(`/api/v1/auction/go-live/${auctionTournamentId}`, {});
+                        toast.success('Tournament is now Live');
+                        // Light refresh of live players and teams
+                        try {
+                          await fetchLivePlayers(true);
+                          await fetchTeams(auctionTournamentId, true);
+                          bcRef.current?.postMessage({ type: 'refresh', section: 'live-auction' });
+                        } catch {}
+                      } catch (e:any) {
+                        toast.error('Failed to go live: ' + (e?.message || 'Unknown error'));
+                      }
+                    }}
+                  >
+                    Live
+                  </Button>
                 </div>
               </div>
               {/* Team Overview banner removed as per request */}
               {/* Available teams rendered as stacked banners */}
-              <div className="mt-3 space-y-1.5">
+              <div className="mt-4 space-y-2">
                 {teams.filter((t:any, i:number, a:any[]) => a.findIndex(x => String(x.id) === String(t.id)) === i).slice(0, 50).map((team: any) => (
                   <Card
                     key={team.id}
-                    className={`border shadow-sm hover:shadow-md transition rounded-lg ${selectedLiveTeamId===team.id? 'ring-1 ring-blue-400' : ''} bg-white`}
+                    className={`border-0 shadow-md hover:shadow-xl transition rounded-xl ${selectedLiveTeamId===team.id? 'ring-2 ring-indigo-400' : ''} bg-gradient-to-br from-white to-indigo-50/50`}
                     onClick={() => setSelectedLiveTeamId(team.id)}
                   >
-                    <CardContent className="p-2 md:p-2.5">
+                    <CardContent className="p-3 md:p-3.5">
                       <div className="grid grid-cols-12 items-center gap-2">
                         <div className="col-span-5 md:col-span-4 min-w-0">
                           <div className="text-[10px] uppercase tracking-wide text-gray-500">Team</div>
-                          <div className="text-sm md:text-base font-semibold truncate">{team.team_name || team.name}</div>
+                          <div className="text-sm md:text-base font-semibold truncate text-gray-800">{team.team_name || team.name}</div>
                         </div>
                         {(() => {
                           const s = allTeamsStatsMap[String(team.id)] || {};
                           const Box = ({label, value}:{label:string, value:any}) => (
-                            <div className="px-1.5 py-1 rounded border bg-gray-50 text-center">
+                            <div className="px-1.5 py-1 rounded-lg bg-white/70 border border-indigo-100 text-center shadow-sm">
                               <div className="text-[9px] text-gray-500 leading-none">{label}</div>
-                              <div className="text-[11px] font-semibold leading-tight">{value ?? '-'}</div>
+                              <div className="text-[11px] font-semibold leading-tight text-gray-800">{value ?? '-'}</div>
                             </div>
                           );
                           return (
@@ -1141,7 +1203,7 @@ toast.success("Logged out");
                               <div className="col-span-5 flex items-center gap-2 mt-1">
                                 <input
                                   type="number"
-                                  className="w-24 px-2 py-1 border rounded"
+                                  className="w-28 px-3 py-2 border rounded-lg bg-white/90 focus:outline-none focus:ring-2 focus:ring-indigo-300"
                                   placeholder="Add coins"
                                   value={teamCoinInputMap[String(team.id)] ?? ''}
                                   onChange={(e)=>{
@@ -1152,18 +1214,40 @@ toast.success("Logged out");
                                 <Button
                                   variant="outline"
                                   size="sm"
-                                  onClick={()=>{
+                                  className="border-indigo-200 text-indigo-700 hover:bg-indigo-50"
+                                  onClick={async ()=>{
                                     const add = Number(teamCoinInputMap[String(team.id)] ?? 0) || 0;
-                                    if (add === 0) return;
-                                    setAllTeamsStatsMap(prev=>{
-                                      const copy = { ...prev } as any;
-                                      const cur = { ...(copy[String(team.id)] || {}) };
-                                      cur.teamCoins = Number(cur.teamCoins ?? 0) + add;
-                                      copy[String(team.id)] = cur;
-                                      return copy;
-                                    });
-                                    setTeamCoinInputMap(prev=>({ ...prev, [String(team.id)]: 0 }));
-                                    toast.success(`Added ${add} coins to ${team.team_name || team.name}`);
+                                    if (!auctionTournamentId) { toast.error('Select a tournament first'); return; }
+                                    if (add === 0) { toast.error('Enter coin amount'); return; }
+                                    try {
+                                      // Call backend: POST /api/v1/admin/update/team/coin/{tournament_id}/{team_id}?new_coin={add}
+                                      await api.post(`/api/v1/admin/update/team/coin/${auctionTournamentId}/${team.id}?new_coin=${encodeURIComponent(String(add))}`, {});
+                                      // Optimistic local update
+                                      setAllTeamsStatsMap(prev=>{
+                                        const copy = { ...prev } as any;
+                                        const cur = { ...(copy[String(team.id)] || {}) };
+                                        cur.teamCoins = Number(cur.teamCoins ?? 0) + add;
+                                        copy[String(team.id)] = cur;
+                                        return copy;
+                                      });
+                                      setTeamCoinInputMap(prev=>({ ...prev, [String(team.id)]: 0 }));
+                                      toast.success(`Added ${add} coins to ${team.team_name || team.name}`);
+                                      // Refresh stats from server for accuracy
+                                      try {
+                                        const list = await api.get(`/api/v1/admin/dashboard/teams/${auctionTournamentId}/player-distribution`);
+                                        if (Array.isArray(list)) {
+                                          const map: Record<string, any> = {};
+                                          list.forEach((item: any) => {
+                                            const normalized = normalizeTeamStats(item);
+                                            const key = String(item.team_id || item.id || '');
+                                            if (key) map[key] = normalized;
+                                          });
+                                          setAllTeamsStatsMap(map);
+                                        }
+                                      } catch {}
+                                    } catch (e:any) {
+                                      toast.error('Add coin failed: ' + (e?.message || 'Unknown error'));
+                                    }
                                   }}
                                 >
                                   Add Coin
@@ -1182,31 +1266,31 @@ toast.success("Logged out");
               </div>
             </CardContent>
           </Card>
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 lg:gap-6">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 lg:gap-7">
             {/* Center lanes - Section A..Z built by category */}
             <div className="lg:col-span-8 col-span-1">
               {loadingLivePlayers ? (
-                <Card>
+                <Card className="border-0 shadow-lg">
                   <CardContent>
-                    <p className="text-center py-4">Loading players...</p>
+                    <p className="text-center py-6 text-gray-600">Loading players...</p>
                   </CardContent>
                 </Card>
               ) : getSectionedPlayers(liveCategory).length === 0 ? (
-                <Card>
+                <Card className="border-0 shadow-lg">
                   <CardContent>
-                    <div className="text-sm text-gray-500">No players found for {liveCategory}. Try another tournament or category.</div>
+                    <div className="text-sm text-gray-600">No players found for {liveCategory}. Try another tournament or category.</div>
                   </CardContent>
                 </Card>
               ) : (
                 getSectionedPlayers(liveCategory).map(section => (
-                  <Card key={section.key} className="mb-6">
-                    <CardContent>
-                      <h3 className="font-semibold mb-3">{section.label || `Section ${section.key}`}</h3>
+                  <Card key={section.key} className="mb-6 border-0 shadow-xl bg-gradient-to-br from-white to-indigo-50/60">
+                    <CardContent className="p-4 md:p-6">
+                      <h3 className="font-semibold mb-3 text-indigo-700">{section.label || `Section ${section.key}`}</h3>
                       <div className="space-y-3">
                         {section.players.map((p:any) => (
                           <div
                             key={p.id}
-                            className="h-14 rounded-md border bg-white flex items-center px-4 justify-between cursor-pointer hover:bg-gray-50 transition-colors"
+                            className="h-14 rounded-lg border border-indigo-100 bg-white/90 flex items-center px-4 justify-between cursor-pointer hover:bg-indigo-50 transition-colors shadow-sm"
                             onClick={() => {
                               setLastClickedPlayer({ id: p.id, name: p.name || p.player_name, base_price: (p.base_price ?? p.basePrice ?? 0), auction_player_id: p.auction_player_id });
                               const playerData = {
@@ -1247,7 +1331,7 @@ toast.success("Logged out");
                               }
                             }}
                           >
-                            <div className="font-medium">{p.name || p.player_name}</div>
+                            <div className="font-medium text-gray-800">{p.name || p.player_name}</div>
                             <div className="text-sm text-gray-500">Base: ৳{p.base_price || p.basePrice || 0}</div>
                           </div>
                         ))}
@@ -1259,8 +1343,8 @@ toast.success("Logged out");
             </div>
             {/* Right controls - Category, Amount, Overview */}
             <div className="lg:col-span-4 col-span-1">
-              <Card className="mb-6">
-                <CardContent>
+              <Card className="mb-6 border-0 shadow-xl bg-gradient-to-br from-white to-purple-50/60">
+                <CardContent className="p-4 md:p-6">
                   <Label>Category</Label>
                   <Select value={liveCategory} onChange={e => setLiveCategory(e.target.value)}>
                     {['STAR','Batter','Bowler','All-rounder','WK Batsman'].map(c => (
@@ -1269,20 +1353,20 @@ toast.success("Logged out");
                   </Select>
                   <div className="h-4" />
                   <Label>Bid Amount</Label>
-                  <div className="bg-gray-50 border rounded-lg p-2 flex items-center gap-2">
+                  <div className="bg-white/90 border border-indigo-100 rounded-xl p-2 flex items-center gap-2 shadow-sm">
                     <Button
                       variant="outline"
                       size="sm"
                       onClick={() => changeLiveAmount(-50)}
-                      className="rounded-full w-9 h-9 flex items-center justify-center"
+                      className="rounded-full w-9 h-9 flex items-center justify-center border-indigo-200 text-indigo-700 hover:bg-indigo-50"
                     >
                       −
                     </Button>
-                    <div className="px-3 py-2 bg-white rounded-md border flex items-center gap-2 w-full">
+                    <div className="px-3 py-2 bg-white rounded-lg border flex items-center gap-2 w-full">
                       <span className="text-gray-500">৳</span>
                       <input
                         type="number"
-                        className="w-full outline-none"
+                        className="w-full outline-none text-gray-800"
                         placeholder="Enter bid amount"
                         value={liveAmount}
                         onChange={e => setLiveAmount(e.target.value)}
@@ -1291,7 +1375,7 @@ toast.success("Logged out");
                     <Button
                       size="sm"
                       onClick={() => changeLiveAmount(50)}
-                      className="rounded-full w-9 h-9 flex items-center justify-center"
+                      className="rounded-full w-9 h-9 flex items-center justify-center bg-indigo-600 hover:bg-indigo-700 text-white"
                     >
                       +
                     </Button>
@@ -1300,7 +1384,7 @@ toast.success("Logged out");
                     {[100,200,500,1000].map(v => (
                       <button
                         key={v}
-                        className="px-3 py-1 text-sm rounded-full bg-white border text-gray-700 hover:bg-gray-50"
+                        className="px-3 py-1 text-sm rounded-full bg-white border border-indigo-200 text-indigo-700 hover:bg-indigo-50"
                         onClick={() => changeLiveAmount(v)}
                         type="button"
                       >
@@ -1309,7 +1393,7 @@ toast.success("Logged out");
                     ))}
                   </div>
                   <Button
-                    className="w-full mt-4"
+                    className="w-full mt-4 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white font-semibold shadow-md hover:shadow-lg"
                     onClick={() => {
                       if (!lastClickedPlayer) { toast.error('Open a player first.'); return; }
                       const newBidAmount = parseLiveAmount();
@@ -1529,6 +1613,12 @@ toast.success("Logged out");
                                 toast.success(`Assigned and added to Sold: ${teamName}`);
                                 // Remove the player from section list after assignment
                                 setLivePlayers(prev => prev.filter((x:any) => String(x.id) !== String(lastClickedPlayer.id)));
+                                // Persist to blacklist immediately
+                                try {
+                                  const list = readSoldBlacklist();
+                                  list.push(String(lastClickedPlayer.id));
+                                  writeSoldBlacklist(list);
+                                } catch {}
                               } catch (e:any) {
                                 toast.error('Assign failed: ' + (e?.message || 'Unknown error'));
                               }
