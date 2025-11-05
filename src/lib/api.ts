@@ -531,21 +531,74 @@ export function backgroundImageUrl(filename: string): string {
 
 // Tournament images
 export async function uploadTournamentImage(file: File, tournamentId?: string | number): Promise<unknown> {
-  // Backend expects: POST /api/v1/upload/tounament/image?tounament_id={id}
-  // We'll be generous and also include a form field for broader compatibility.
+  // Try multiple endpoint/param combinations to maximize compatibility
   const fd = new FormData();
+  // Match backend exactly: single field named "file"
   fd.set("file", file);
-  if (tournamentId !== undefined) {
-    // Some backends read form-data, others read query param (with the misspelled key)
-    fd.set("tournament_id", String(tournamentId));
-  }
   const token = getAuthToken();
-  const url = tournamentId !== undefined
-    ? `${buildUrl(API_PATHS.uploadTournamentImage)}?tounament_id=${encodeURIComponent(String(tournamentId))}`
-    : buildUrl(API_PATHS.uploadTournamentImage);
-  const res = await fetch(url, { method: "POST", headers: token ? { Authorization: `Bearer ${token}` } : undefined, body: fd });
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-  return await res.json();
+  // Prepare multiple auth header variants to accommodate different backend schemes
+  const authHeaderVariants: Array<Record<string, string> | undefined> = (() => {
+    if (!token) return [undefined];
+    return [
+      { Authorization: `Bearer ${token}` },
+      { Authorization: `JWT ${token}` },
+      { Authorization: `Token ${token}` },
+      { Authorization: token }, // raw token as Authorization value
+      { "X-Auth-Token": token },
+      { "X-API-KEY": token },
+    ];
+  })();
+  const idQ = tournamentId !== undefined ? String(tournamentId) : undefined;
+  const candidates: string[] = [];
+  // Provided paths (with misspelling)
+  if (idQ) candidates.push(`${buildUrl(API_PATHS.uploadTournamentImage)}?tounament_id=${encodeURIComponent(idQ)}`);
+  candidates.push(buildUrl(API_PATHS.uploadTournamentImage));
+  // Alternate: correct spelling "tournament"
+  const altBase = buildUrl("/api/v1/upload/tournament/image");
+  if (idQ) {
+    candidates.push(`${altBase}?tournament_id=${encodeURIComponent(idQ)}`);
+    candidates.push(`${altBase}?tounament_id=${encodeURIComponent(idQ)}`);
+  }
+  candidates.push(altBase);
+
+  let lastErr: unknown = null;
+  const attempts: Array<{ url: string; status?: number; note?: string; auth?: string }> = [];
+  for (const url of candidates) {
+    // Try each auth scheme for this URL
+    for (const hdr of authHeaderVariants) {
+      try {
+        const headers: Record<string, string> | undefined = hdr ? { ...hdr, accept: "application/json" } : { accept: "application/json" };
+        const res = await fetch(url, { method: "POST", headers, body: fd });
+        if (res.ok) {
+          try { return await res.json(); } catch { return null; }
+        }
+        // For 404/405/415, attempt next combination
+        if ([404, 405, 415].includes(res.status)) {
+          lastErr = new Error(`${res.status} ${res.statusText}`);
+          attempts.push({ url, status: res.status, auth: hdr ? Object.keys(hdr)[0] : "none" });
+          // break auth loop if clearly not found; try next URL
+          break;
+        }
+        const text = await res.text();
+        const msg = text || `${res.status} ${res.statusText}`;
+        attempts.push({ url, status: res.status, note: msg, auth: hdr ? Object.keys(hdr)[0] : "none" });
+        // If unauthorized, keep trying other auth variants for the same URL
+        if (res.status === 401 || res.status === 403) {
+          continue; // try next auth header variant for this URL
+        }
+        throw new Error(`Upload failed @ ${url} → ${msg}`);
+      } catch (err) {
+        lastErr = err as unknown;
+        // Continue to next auth header or URL
+      }
+    }
+  }
+  if (lastErr) {
+    const summary = attempts.map(a => `${a.url} [auth:${a.auth ?? 'none'}] ${a.status ?? ''} ${a.note ?? ''}`.trim()).join(" | ");
+    const err = lastErr instanceof Error ? new Error(`${lastErr.message}${summary ? ` | Tried: ${summary}` : ''}`) : new Error(summary || 'Unknown upload error');
+    throw err;
+  }
+  throw new Error("Upload failed: no valid endpoint");
 }
 export async function listTournamentImageFiles(tournamentId?: string): Promise<unknown> {
   const path = tournamentId

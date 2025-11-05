@@ -2,9 +2,10 @@ import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Play } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
-import { fetchAllTournaments, fetchTournamentImages, tournamentImageUrl, type UITournament } from "@/lib/api";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { ChevronLeft, ChevronRight, Download, Link as LinkIcon } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { fetchAllTournaments, fetchTournamentImages, type UITournament } from "@/lib/api";
 
 const GalleryPage = () => {
   const [tournaments, setTournaments] = useState<UITournament[]>([]);
@@ -12,6 +13,8 @@ const GalleryPage = () => {
   const [images, setImages] = useState<string[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [videos, setVideos] = useState<string[]>([]); // store YouTube URLs
+  const [lightboxOpen, setLightboxOpen] = useState(false);
+  const [lightboxIndex, setLightboxIndex] = useState(0);
 
   // Load tournaments and default
   useEffect(() => {
@@ -68,6 +71,23 @@ const GalleryPage = () => {
 
   const selectedTournament = useMemo(() => tournaments.find((t) => t.id === selectedTournamentId) || null, [tournaments, selectedTournamentId]);
 
+  const openLightbox = useCallback((index: number) => {
+    setLightboxIndex(index);
+    setLightboxOpen(true);
+  }, []);
+  const closeLightbox = useCallback(() => setLightboxOpen(false), []);
+  const prevImage = useCallback(() => setLightboxIndex((i) => (i - 1 + images.length) % images.length), [images.length]);
+  const nextImage = useCallback(() => setLightboxIndex((i) => (i + 1) % images.length), [images.length]);
+  const copyLink = useCallback(async (url: string) => {
+    try {
+      await navigator.clipboard.writeText(url);
+      // naive toast — use alert to avoid pulling toast lib here
+      window.alert("Link copied to clipboard");
+    } catch {
+      window.alert("Copy failed");
+    }
+  }, []);
+
   return (
     <div className="min-h-screen">
       <Navbar />
@@ -121,10 +141,12 @@ const GalleryPage = () => {
                       className="relative rounded-xl overflow-hidden shadow-lg hover:shadow-glow transition-all duration-300 hover:-translate-y-2 aspect-video group animate-scale-in"
                       style={{ animationDelay: `${index * 0.05}s` }}
                     >
-                      <img 
-                        src={img} 
+                      <img
+                        src={img}
+                        loading="lazy"
                         alt={`Gallery ${index + 1}`}
-                        className="w-full h-full object-cover"
+                        className="w-full h-full object-cover cursor-zoom-in"
+                        onClick={() => openLightbox(index)}
                       />
                       <div className="absolute inset-0 bg-gradient-to-t from-primary/90 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end">
                         <p className="text-primary-foreground font-medium p-4">{selectedTournament?.title} {selectedTournament?.year ? `(${selectedTournament?.year})` : ''}</p>
@@ -166,6 +188,33 @@ const GalleryPage = () => {
         </div>
       </main>
       <Footer />
+
+      {/* Lightbox */}
+      <Dialog open={lightboxOpen} onOpenChange={setLightboxOpen}>
+        <DialogContent className="max-w-5xl p-0 bg-black/95 border-0">
+          {images.length > 0 && (
+            <div className="relative w-full">
+              <img src={images[lightboxIndex]} alt="preview" className="w-full max-h-[80vh] object-contain select-none" />
+              {/* Controls */}
+              <button aria-label="Previous" onClick={prevImage} className="absolute left-2 top-1/2 -translate-y-1/2 p-2 rounded-full bg-white/10 hover:bg-white/20 text-white">
+                <ChevronLeft />
+              </button>
+              <button aria-label="Next" onClick={nextImage} className="absolute right-2 top-1/2 -translate-y-1/2 p-2 rounded-full bg-white/10 hover:bg-white/20 text-white">
+                <ChevronRight />
+              </button>
+              <div className="absolute bottom-2 right-2 flex gap-2">
+                <a href={images[lightboxIndex]} download className="p-2 rounded-full bg-white/10 hover:bg-white/20 text-white" aria-label="Download">
+                  <Download />
+                </a>
+                <button onClick={() => copyLink(images[lightboxIndex])} className="p-2 rounded-full bg-white/10 hover:bg-white/20 text-white" aria-label="Copy link">
+                  <LinkIcon />
+                </button>
+                <button onClick={closeLightbox} className="p-2 rounded-full bg-white/10 hover:bg-white/20 text-white" aria-label="Close">✕</button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

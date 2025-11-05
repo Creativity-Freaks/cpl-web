@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Trophy, Users, DollarSign, LogOut, Activity } from 'lucide-react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { Trophy, Users, DollarSign, LogOut, Activity, Image as ImageIcon, PlayCircle } from 'lucide-react';
 import DatePicker from 'react-datepicker';
 import "react-datepicker/dist/react-datepicker.css";
 import { useNavigate } from "react-router-dom";
@@ -8,13 +8,15 @@ import { AdminPlayerUpdateInfo } from './admin_player_update_info';
 import { AdminPlayerImage } from './admin_player_image';
 // --- CONFIG ---
 import { API_BASE, LOGIN_URL, buildUrl } from '../config/api';
+import { uploadTournamentImage, fetchTournamentImages, getAuthToken } from "../lib/api";
 const API_TIMEOUT = 10000;
 // --- API HELPER ---
 const api = {
 async request(url: string, options: RequestInit = {}) {
 const controller = new AbortController();
 const id = setTimeout(() => controller.abort(), API_TIMEOUT);
-const token = localStorage.getItem("auth_token");
+// Use unified token source so both Admin login and app auth work
+const token = getAuthToken();
 const headers: HeadersInit = {
   "Content-Type": "application/json",
   ...options.headers,
@@ -141,10 +143,21 @@ const Admin: React.FC = () => {
   const visibleCount = 5; // 5 players at a time
   const visibleCountConfirmed = 5;
   const [teamCoinInputMap, setTeamCoinInputMap] = useState<Record<string, number>>({});
+  // Gallery states
+  const [galleryTournamentId, setGalleryTournamentId] = useState<string | null>(null);
+  const [galleryImages, setGalleryImages] = useState<string[]>([]);
+  const [galleryLoading, setGalleryLoading] = useState<boolean>(false);
+  const [videoInput, setVideoInput] = useState<string>("");
+  const [videos, setVideos] = useState<string[]>([]);
+  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+  const [uploading, setUploading] = useState<boolean>(false);
+  const [fileInputKey, setFileInputKey] = useState<number>(0);
   const toast = {
     success: (msg: string) => setToastMsg({type: 'success' as const, msg: `Success: ${msg}`}),
     error: (msg: string) => setToastMsg({type: 'error' as const, msg: `Error: ${msg}`}),
   };
+
+  
   // Persisted blacklist of sold players by tournament so they never reappear in lists
   const soldBlacklistKey = (tid: number | null) => tid ? `sold_blacklist_${tid}` : '';
   const readSoldBlacklist = useCallback((): string[] => {
@@ -163,6 +176,27 @@ const Admin: React.FC = () => {
       return () => clearTimeout(timer);
     }
   }, [toastMsg]);
+  // Initialize gallery videos from localStorage
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("gallery_videos") || "[]";
+      const arr = JSON.parse(raw);
+      if (Array.isArray(arr)) setVideos(arr.map(String));
+    } catch { setVideos([]); }
+  }, []);
+  // Load gallery images when tournament changes
+  useEffect(() => {
+    (async () => {
+      if (!galleryTournamentId) { setGalleryImages([]); return; }
+      try {
+        setGalleryLoading(true);
+        const files = await fetchTournamentImages(galleryTournamentId);
+        setGalleryImages(files.map(f => f.url));
+      } catch {
+        setGalleryImages([]);
+      } finally { setGalleryLoading(false); }
+    })();
+  }, [galleryTournamentId]);
   // Persist and restore active section across reloads
   useEffect(() => {
     try { if (activeSection) localStorage.setItem('admin_active_section', activeSection); } catch {}
@@ -886,6 +920,70 @@ const Admin: React.FC = () => {
    
     return sections;
   }, [livePlayers, readSoldBlacklist, getPlayerCategory, normalizeCategory]);
+  
+  // Moved out of conditional render to satisfy React Hooks rules
+  const handleUpdatePlayerInfo = useCallback(async (updatedData: any) => {
+    // After update, refresh from API endpoint to get latest data
+    if (auctionTournamentId) {
+      try {
+        // Refresh auction players from the GET endpoint
+        const refreshedPlayers = await fetchConfirmedAuctionPlayers(auctionTournamentId);
+
+        // Fetch all players for full details - Extract from data.all_player_list
+        const allData = await api.get("/api/v1/adminall/players");
+        const allPlayersList = Array.isArray(allData?.all_player_list) ? allData.all_player_list : [];
+
+        // Merge full details for confirmed players
+        const fullConfirmed = refreshedPlayers.map((c: any) => {
+          const fullP = allPlayersList.find((p: any) => p.id === (c.player_id || c.id));
+          if (fullP) {
+            return {
+              ...fullP,
+              auction_player_id: c.auction_player_id || c.id,
+              start_players: c.start_players,
+              base_price: c.base_price,
+            };
+          }
+          return { ...c, name: c.player_name };
+        });
+
+        // Update confirmed players list
+        setConfirmedAuctionPlayers(fullConfirmed);
+        setDisplayedConfirmedPlayers(fullConfirmed.slice(0, visibleCountConfirmed));
+
+        // Filter updated players: only those with both base_price and start_players set
+        const updated = fullConfirmed.filter((p: any) =>
+          p.start_players &&
+          p.base_price &&
+          p.start_players !== '' &&
+          p.base_price !== 0 &&
+          Number(p.base_price) > 0
+        );
+        setUpdatedPlayers(updated);
+
+        toast.success("Player updated successfully!");
+      } catch (error: any) {
+        console.error("Failed to refresh after update:", error);
+        toast.error("Update saved but failed to refresh list");
+        // Fallback: try to update local state
+        const id = updatedData?.auction_player_id || selectedUpdatePlayer?.auction_player_id || selectedUpdatePlayer?.id;
+        const merged = { ...(selectedUpdatePlayer || {}), ...(updatedData || {}) };
+        setUpdatedPlayers(prev => {
+          const idx = prev.findIndex(p => (p.auction_player_id || p.id) === id);
+          if (idx >= 0) {
+            const copy = [...prev];
+            copy[idx] = { ...copy[idx], ...merged };
+            return copy;
+          }
+          // Only add if both base_price and start_players are set
+          if (merged.base_price && merged.start_players && merged.base_price !== 0) {
+            return [...prev, merged];
+          }
+          return prev;
+        });
+      }
+    }
+  }, [auctionTournamentId, fetchConfirmedAuctionPlayers, selectedUpdatePlayer, visibleCountConfirmed]);
   // --- LOGIN PAGE ---
   if (!isAuthenticated) {
     return (
@@ -928,7 +1026,9 @@ const Admin: React.FC = () => {
                     }
                   }
                   if (res && res.ok && data && data.access_token) {
+                    // Persist token under both keys for consistency with shared API utils
                     localStorage.setItem("auth_token", data.access_token);
+                    try { localStorage.setItem("cpl_access_token", data.access_token); } catch {}
                     setIsAuthenticated(true);
                     toast.success("Login successful!");
                   } else {
@@ -972,6 +1072,7 @@ const Admin: React.FC = () => {
               { id: "auction", label: "Auction", icon: DollarSign },
               { id: "auction-players", label: "Auction Players", icon: DollarSign },
               { id: "live-auction", label: "Live Auction", icon: Activity },
+              { id: "gallery", label: "Gallery Upload", icon: ImageIcon },
               { id: "match", label: "Match", icon: Activity },
             ].map(item => (
               <button
@@ -1718,6 +1819,151 @@ const Admin: React.FC = () => {
               </div>
             </>
           )}
+          {/* === GALLERY UPLOAD SECTION === */}
+          {activeSection === "gallery" && (
+            <>
+              <h1 className="text-3xl font-bold flex items-center gap-3 mb-6">
+                <ImageIcon className="text-pink-600" /> Gallery Upload
+              </h1>
+              <Card className="mb-8">
+                <CardContent>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="md:col-span-2">
+                      <Label>Select Tournament</Label>
+                      <Select
+                        value={galleryTournamentId || ''}
+                        onChange={e => setGalleryTournamentId(e.target.value || null)}
+                      >
+                        <option value="">Select Tournament</option>
+                        {tournaments.map(t => (
+                          <option key={t.id} value={t.id}>{t.name} ({t.year})</option>
+                        ))}
+                      </Select>
+                    </div>
+                    <div className="flex items-end gap-2">
+                      <input
+                        type="file"
+                        accept="image/*"
+                        multiple
+                        key={fileInputKey}
+                        disabled={!galleryTournamentId}
+                        onChange={(e) => {
+                          const files = Array.from(e.target.files || []);
+                          setPendingFiles(files);
+                        }}
+                        className="w-full p-3 border rounded-lg bg-white disabled:opacity-50"
+                      />
+                      <Button
+                        onClick={async () => {
+                          if (!galleryTournamentId) { toast.error('Select a tournament first'); return; }
+                          if (pendingFiles.length === 0) { toast.error('Select image files first'); return; }
+                          setUploading(true);
+                          try {
+                            let success = 0;
+                            for (const f of pendingFiles) {
+                              try { await uploadTournamentImage(f, galleryTournamentId); success++; }
+                              catch (err:any) {
+                                const msg = err?.message || 'Unknown error';
+                                const extra = /401|Invalid token|not an admin/i.test(msg) ? ' (tip: re-login with an admin account)' : '';
+                                toast.error(`Failed: ${f.name} — ${msg}${extra}`);
+                                console.error('Upload failed', f.name, err);
+                              }
+                            }
+                            if (success > 0) {
+                              toast.success(`${success} image(s) uploaded`);
+                              try {
+                                const imgs = await fetchTournamentImages(galleryTournamentId);
+                                setGalleryImages(imgs.map(i => i.url));
+                              } catch {}
+                            }
+                          } finally {
+                            setUploading(false);
+                            setPendingFiles([]);
+                            setFileInputKey(k => k + 1);
+                          }
+                        }}
+                        disabled={!galleryTournamentId || pendingFiles.length === 0 || uploading}
+                      >
+                        {uploading ? 'Uploading…' : `Upload${pendingFiles.length ? ` (${pendingFiles.length})` : ''}`}
+                      </Button>
+                    </div>
+                    {pendingFiles.length > 0 && (
+                      <div className="md:col-span-3 text-xs text-gray-600">
+                        Selected: {pendingFiles.map(f => f.name).join(', ')}
+                      </div>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Images preview */}
+              <Card className="mb-8">
+                <CardContent>
+                  <div className="flex items-center justify-between mb-4">
+                    <h2 className="text-xl font-semibold">Images</h2>
+                    {galleryLoading && <span className="text-sm text-gray-500">Loading…</span>}
+                  </div>
+                  {(!galleryTournamentId) ? (
+                    <div className="text-sm text-gray-500">Select a tournament to view images.</div>
+                  ) : galleryImages.length === 0 ? (
+                    <div className="text-sm text-gray-500">No images uploaded yet.</div>
+                  ) : (
+                    <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
+                      {galleryImages.map((url, idx) => (
+                        <div key={idx} className="rounded-lg overflow-hidden border">
+                          <img src={url} alt={`img-${idx}`} className="w-full h-28 object-cover" />
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* Videos manager */}
+              <Card>
+                <CardContent>
+                  <h2 className="text-xl font-semibold mb-4 flex items-center gap-2"><PlayCircle className="h-5 w-5 text-rose-600"/> Videos</h2>
+                  <div className="flex gap-2 mb-4">
+                    <Input
+                      placeholder="Paste YouTube URL and press Add"
+                      value={videoInput}
+                      onChange={(e)=> setVideoInput(e.target.value)}
+                    />
+                    <Button onClick={() => {
+                      const v = videoInput.trim();
+                      if (!v) return;
+                      const next = Array.from(new Set([...(videos||[]), v]));
+                      setVideos(next);
+                      try { localStorage.setItem('gallery_videos', JSON.stringify(next)); } catch {}
+                      setVideoInput('');
+                      toast.success('Video added');
+                    }}>Add</Button>
+                  </div>
+                  {videos.length === 0 ? (
+                    <div className="text-sm text-gray-500">No videos added yet.</div>
+                  ) : (
+                    <div className="space-y-2">
+                      {videos.map((v, i) => (
+                        <div key={`${i}-${v}`} className="flex items-center justify-between p-2 border rounded-lg bg-white">
+                          <a href={v} target="_blank" rel="noreferrer" className="text-blue-700 truncate max-w-[70%] hover:underline">{v}</a>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="text-red-600 border-red-300 hover:bg-red-50"
+                            onClick={() => {
+                              const next = videos.filter((x, idx) => idx !== i);
+                              setVideos(next);
+                              try { localStorage.setItem('gallery_videos', JSON.stringify(next)); } catch {}
+                            }}
+                          >Remove</Button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </>
+          )}
           {/* === AUCTION PLAYERS SECTION === */}
           {activeSection === "auction-players" && (
             <>
@@ -1963,68 +2209,7 @@ const Admin: React.FC = () => {
             setSelectedUpdatePlayer(null);
             if (auctionTournamentId) loadAuctionData();
           }}
-          onUpdate={useCallback(async (updatedData: any) => {
-            // After update, refresh from API endpoint to get latest data
-            if (auctionTournamentId) {
-              try {
-                // Refresh auction players from the GET endpoint
-                const refreshedPlayers = await fetchConfirmedAuctionPlayers(auctionTournamentId);
-               
-                // Fetch all players for full details - Extract from data.all_player_list
-                const allData = await api.get("/api/v1/adminall/players");
-                const allPlayersList = Array.isArray(allData?.all_player_list) ? allData.all_player_list : [];
-               
-                // Merge full details for confirmed players
-                const fullConfirmed = refreshedPlayers.map((c: any) => {
-                  const fullP = allPlayersList.find((p: any) => p.id === (c.player_id || c.id));
-                  if (fullP) {
-                    return {
-                      ...fullP,
-                      auction_player_id: c.auction_player_id || c.id,
-                      start_players: c.start_players,
-                      base_price: c.base_price,
-                    };
-                  }
-                  return { ...c, name: c.player_name };
-                });
-               
-                // Update confirmed players list
-                setConfirmedAuctionPlayers(fullConfirmed);
-                setDisplayedConfirmedPlayers(fullConfirmed.slice(0, visibleCountConfirmed));
-               
-                // Filter updated players: only those with both base_price and start_players set
-                const updated = fullConfirmed.filter((p: any) =>
-                  p.start_players &&
-                  p.base_price &&
-                  p.start_players !== '' &&
-                  p.base_price !== 0 &&
-                  Number(p.base_price) > 0
-                );
-                setUpdatedPlayers(updated);
-               
-                toast.success("Player updated successfully!");
-              } catch (error: any) {
-                console.error("Failed to refresh after update:", error);
-                toast.error("Update saved but failed to refresh list");
-                // Fallback: try to update local state
-                const id = updatedData?.auction_player_id || selectedUpdatePlayer?.auction_player_id || selectedUpdatePlayer?.id;
-                const merged = { ...(selectedUpdatePlayer || {}), ...(updatedData || {}) };
-                setUpdatedPlayers(prev => {
-                  const idx = prev.findIndex(p => (p.auction_player_id || p.id) === id);
-                  if (idx >= 0) {
-                    const copy = [...prev];
-                    copy[idx] = { ...copy[idx], ...merged };
-                    return copy;
-                  }
-                  // Only add if both base_price and start_players are set
-                  if (merged.base_price && merged.start_players && merged.base_price !== 0) {
-                    return [...prev, merged];
-                  }
-                  return prev;
-                });
-              }
-            }
-          }, [auctionTournamentId, fetchConfirmedAuctionPlayers, selectedUpdatePlayer, visibleCountConfirmed])}
+          onUpdate={handleUpdatePlayerInfo}
         />
       )}
     </div>
