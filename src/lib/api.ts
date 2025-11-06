@@ -352,6 +352,9 @@ export const API_PATHS = {
   // Auth
   login: "/api/v1/token",
   registration: "/api/v1/registration",
+  // Password / Auth recovery
+  forgotPassword: "/api/v1/forgoten/password", // note: backend path uses 'forgoten'
+  passwordReset: "/api/v1/password/reset",
   // Player profile image
   uploadPlayerProfile: "/api/v1/upload/player/profile",
   getPlayerProfile: (filename: string) => `/api/v1/player/profile/${filename}`,
@@ -428,7 +431,9 @@ export function clearAuthTokens() {
     localStorage.removeItem(ACCESS_TOKEN_KEY_PRIMARY);
     localStorage.removeItem(ACCESS_TOKEN_KEY_FALLBACK);
     localStorage.removeItem("cpl_current_user");
-  } catch {}
+  } catch {
+    /* no-op */
+  }
 }
 
 async function apiFetchJson<T>(path: string, init?: JsonInit): Promise<T> {
@@ -453,7 +458,9 @@ async function apiFetchJson<T>(path: string, init?: JsonInit): Promise<T> {
       const bc = new BroadcastChannel('auth-updates');
       bc.postMessage({ type: 'session-expired' });
       bc.close();
-    } catch {}
+    } catch {
+      /* no-op */
+    }
     throw new Error('Session expired. Please login again.');
   }
   
@@ -483,6 +490,39 @@ export async function registerUser(payload: Record<string, unknown>): Promise<un
   return apiFetchJson(API_PATHS.registration, { method: "POST", body: payload });
 }
 
+// Password recovery
+export async function requestPasswordReset(email: string): Promise<unknown> {
+  // Minimal payload commonly expected by backends
+  const body = { email } as const;
+  return apiFetchJson(API_PATHS.forgotPassword, { method: "POST", body });
+}
+
+export type ResetPasswordPayload = {
+  // If coming from email link
+  token?: string | null;
+  // For authenticated change (optional and best-effort)
+  current?: string | null;
+  // New password and confirmation
+  password: string;
+  confirm?: string | null;
+  // Some backends require email with token as well
+  email?: string | null;
+};
+export async function resetPassword(payload: ResetPasswordPayload): Promise<unknown> {
+  const body: Record<string, unknown> = {};
+  if (payload.email) body.email = payload.email;
+  if (payload.token) body.token = payload.token;
+  if (payload.current) body.current_password = payload.current;
+  // Provide a few common key variants to maximize compatibility
+  body.password = payload.password;
+  if (payload.confirm ?? payload.password) {
+    body.confirm_password = payload.confirm ?? payload.password;
+    body.password_confirmation = payload.confirm ?? payload.password;
+  }
+  // POST to the reset endpoint
+  return apiFetchJson(API_PATHS.passwordReset, { method: "POST", body });
+}
+
 // Player profile image
 export async function uploadPlayerProfileImage(file: File): Promise<unknown> {
   const fd = new FormData();
@@ -500,7 +540,9 @@ export async function uploadPlayerProfileImage(file: File): Promise<unknown> {
       const bc = new BroadcastChannel('auth-updates');
       bc.postMessage({ type: 'session-expired' });
       bc.close();
-    } catch {}
+    } catch {
+      /* no-op */
+    }
     throw new Error('Session expired. Please login again.');
   }
   

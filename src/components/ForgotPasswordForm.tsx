@@ -5,6 +5,7 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
+import { requestPasswordReset } from "@/lib/api";
 
 type Props = { compact?: boolean; onSuccess?: () => void };
 
@@ -13,9 +14,14 @@ const ForgotPasswordForm: React.FC<Props> = ({ compact = false, onSuccess }) => 
 
   const onSubmit = form.handleSubmit(async (values) => {
     if (!values.email) return toast.error("Please enter your email");
-    // Backend does not expose a password reset endpoint yet.
-    toast.info("Password reset via email isn't available yet. Please contact an admin or try again later.");
-    onSuccess?.();
+    try {
+      await requestPasswordReset(values.email.trim());
+      toast.success("If that email exists, a reset link has been sent.");
+      onSuccess?.();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to request reset";
+      toast.error(msg);
+    }
   });
 
   const CardNode = (
