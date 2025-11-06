@@ -535,7 +535,7 @@ export async function getPlayerProfiles(): Promise<PlayerProfile | PlayerProfile
 
 export function extractFilename(pathLike: string): string {
   // Handles values like "app/photo/player/abc.png" or just "abc.png"
-  const parts = String(pathLike).split("\\");
+  const parts = String(pathLike).split("/");
   return parts[parts.length - 1] || String(pathLike);
 }
 
