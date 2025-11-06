@@ -1242,9 +1242,17 @@ const Admin: React.FC = () => {
                               src={getPlayerImageUrl(player.photo_url)}
                               alt={player.name}
                               className="w-10 h-10 rounded-full object-cover border border-gray-300"
-                              onError={(e) => {
-                                // Fallback to default image if the specific player image fails to load
-                                const target = e.target as HTMLImageElement;
+                              crossOrigin="anonymous"
+                              referrerPolicy="no-referrer"
+                              onError={async (e) => {
+                                const target = e.currentTarget as HTMLImageElement;
+                                try {
+                                  // Try authenticated/blob fallback
+                                  const { fetchImageAsObjectUrl } = await import("@/lib/api");
+                                  const url = await fetchImageAsObjectUrl(target.src);
+                                  if (url) { target.src = url; return; }
+                                } catch (err) { /* ignore */ }
+                                // Fallback to default image
                                 target.src = buildUrl('/api/v1/player/profile/default.png');
                               }}
                             />
@@ -1281,8 +1289,15 @@ const Admin: React.FC = () => {
                               src={getPlayerImageUrl(player.photo_url)}
                               alt={player.name}
                               className="w-12 h-12 rounded-full object-cover border border-gray-300"
-                              onError={(e) => {
-                                const target = e.target as HTMLImageElement;
+                              crossOrigin="anonymous"
+                              referrerPolicy="no-referrer"
+                              onError={async (e) => {
+                                const target = e.currentTarget as HTMLImageElement;
+                                try {
+                                  const { fetchImageAsObjectUrl } = await import("@/lib/api");
+                                  const url = await fetchImageAsObjectUrl(target.src);
+                                  if (url) { target.src = url; return; }
+                                } catch (err) { /* ignore */ }
                                 target.src = buildUrl('/api/v1/player/profile/default.png');
                               }}
                             />

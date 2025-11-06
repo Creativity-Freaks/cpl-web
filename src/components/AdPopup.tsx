@@ -20,7 +20,7 @@ export default function AdPopup() {
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogContent className="p-0 max-w-3xl overflow-hidden border-0 bg-transparent shadow-none">
+      <DialogContent aria-describedby={undefined} className="p-0 max-w-3xl overflow-hidden border-0 bg-transparent shadow-none">
         <div className="relative rounded-xl overflow-hidden shadow-2xl ring-1 ring-black/10">
           <img src={banner} alt="CPL Banner" className="block w-full h-auto" />
           <Button

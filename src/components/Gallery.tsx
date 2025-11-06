@@ -49,6 +49,17 @@ const Gallery = () => {
                 src={image.src} 
                 alt={image.alt}
                 className="w-full h-full object-cover"
+                crossOrigin="anonymous"
+                referrerPolicy="no-referrer"
+                onError={async (e) => {
+                  try {
+                    const el = e.currentTarget as HTMLImageElement;
+                    const { fetchImageAsObjectUrl } = await import("@/lib/api");
+                    const url = await fetchImageAsObjectUrl(el.src);
+                    if (url) { el.src = url; return; }
+                  } catch {/* ignore */}
+                  e.currentTarget.style.display = 'none';
+                }}
               />
               <div className="absolute inset-0 bg-gradient-to-t from-primary/80 to-transparent opacity-0 hover:opacity-100 transition-opacity flex items-end">
                 <p className="text-primary-foreground font-medium p-4">{image.alt}</p>

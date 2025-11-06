@@ -37,10 +37,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const base: User = existing || { name: 'User', email: '' };
         // Prefer locally saved values for user-editable fields (name, avatar, category)
         // so that a refresh doesn't overwrite changes when the backend doesn't persist them yet.
+        const rawAvatar = base.avatar ?? prof.avatarUrl ?? null;
+        let finalAvatar: string | null = null;
+        if (rawAvatar) {
+          if (/^https?:\/\//i.test(String(rawAvatar))) finalAvatar = String(rawAvatar);
+          else {
+            try {
+              const { resolveProfileImageUrl } = await import("@/lib/api");
+              finalAvatar = resolveProfileImageUrl(String(rawAvatar));
+            } catch { finalAvatar = String(rawAvatar); }
+          }
+        }
         const merged: User = {
           ...base,
           name: base.name || prof.name || 'User',
-          avatar: base.avatar ?? prof.avatarUrl ?? null,
+          avatar: finalAvatar,
           category: base.category ?? prof.category,
           // Always refresh stats from server when available
           runs: prof.runs,
