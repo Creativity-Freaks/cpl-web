@@ -88,4 +88,4 @@ Role access:
 
 ### License
 
-MIT
+MIT 2.0
