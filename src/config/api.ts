@@ -14,5 +14,3 @@ export function buildUrl(path: string): string {
   const p = path.startsWith("/") ? path : `/${path}`;
   return `${base}${p}`;
 }
-
-

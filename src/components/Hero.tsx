@@ -1,7 +1,7 @@
 import { Button } from "./ui/button";
 import { ArrowRight, Calendar, Trophy } from "lucide-react";
 import { Link } from "react-router-dom";
-import bannerImage from "@/assets/hero-cricket.jpg";
+import bannerImage from "@/assets/unnamed.jpg";
 import { useEffect, useState } from "react";
 import { fetchAllTournaments } from "@/lib/api";
 

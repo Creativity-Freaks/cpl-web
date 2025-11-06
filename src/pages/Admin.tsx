@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Trophy, Users, DollarSign, LogOut, Activity, Image as ImageIcon, PlayCircle } from 'lucide-react';
+import { Trophy, Users, DollarSign, LogOut, Activity, Image as ImageIcon, PlayCircle, Menu, X } from 'lucide-react';
 import DatePicker from 'react-datepicker';
 import "react-datepicker/dist/react-datepicker.css";
 import { useNavigate } from "react-router-dom";
@@ -8,7 +8,7 @@ import { AdminPlayerUpdateInfo } from './admin_player_update_info';
 import { AdminPlayerImage } from './admin_player_image';
 // --- CONFIG ---
 import { API_BASE, LOGIN_URL, buildUrl } from '../config/api';
-import { uploadTournamentImage, fetchTournamentImages, getAuthToken } from "../lib/api";
+import { uploadTournamentImage, fetchTournamentImages, getAuthToken, setGlobalLogoutHandler, clearAuthTokens } from "../lib/api";
 const API_TIMEOUT = 10000;
 // --- API HELPER ---
 const api = {
@@ -33,6 +33,19 @@ try {
   clearTimeout(id);
   const text = await response.text();
   console.log(`API ${options.method || 'GET'} ${url} →`, response.status, text);
+  
+  // Check for session expiry (401 or 403)
+  if (response.status === 401 || response.status === 403) {
+    clearAuthTokens();
+    // Trigger logout via BroadcastChannel
+    try {
+      const bc = new BroadcastChannel('auth-updates');
+      bc.postMessage({ type: 'session-expired' });
+      bc.close();
+    } catch {}
+    throw new Error('Session expired. Please login again.');
+  }
+  
   if (!response.ok) {
     let errMsg = "Request failed";
     try {
@@ -62,10 +75,13 @@ const getPlayerImageUrl = (photoUrl: string | null): string => {
   }
  
   // Extract filename from photo_url
-  const filename = photoUrl.split('/').pop() || 'default.png';
+  const filename = photoUrl.split('\\').pop() || 'default.png';
  
   // Build the image URL using the player profile endpoint
   return buildUrl(`/api/v1/player/profile/${filename}`);
+
+
+
 };
 // --- UI COMPONENTS ---
 const Card = ({ children, className = '', ...p }: any) => (
@@ -125,7 +141,7 @@ const Admin: React.FC = () => {
   // Live Auction states
   const [livePlayers, setLivePlayers] = useState<any[]>([]);
   const [loadingLivePlayers, setLoadingLivePlayers] = useState(false);
-  const [liveCategory, setLiveCategory] = useState<string>('Batter');
+  const [liveCategory, setLiveCategory] = useState<string>('All');
   const [liveAmount, setLiveAmount] = useState<string>('');
   const [selectedLiveTeamId, setSelectedLiveTeamId] = useState<number | null>(null);
   const [selectedLiveTeamStats, setSelectedLiveTeamStats] = useState<any | null>(null);
@@ -152,6 +168,7 @@ const Admin: React.FC = () => {
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState<boolean>(false);
   const [fileInputKey, setFileInputKey] = useState<number>(0);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState<boolean>(false);
   const toast = {
     success: (msg: string) => setToastMsg({type: 'success' as const, msg: `Success: ${msg}`}),
     error: (msg: string) => setToastMsg({type: 'error' as const, msg: `Error: ${msg}`}),
@@ -588,6 +605,32 @@ const Admin: React.FC = () => {
     }
   }, [tournaments, fetchTournaments]);
   // --- EFFECTS ---
+  // Set up session expiry handler for Admin
+  useEffect(() => {
+    const handleLogout = () => {
+      clearAuthTokens();
+      setIsAuthenticated(false);
+      toast.error("Session expired. Please login again.");
+    };
+
+    setGlobalLogoutHandler(handleLogout);
+
+    // Listen for session expiry from BroadcastChannel
+    let bc: BroadcastChannel | null = null;
+    try {
+      bc = new BroadcastChannel('auth-updates');
+      bc.onmessage = (ev: MessageEvent) => {
+        if (ev.data?.type === 'session-expired') {
+          handleLogout();
+        }
+      };
+    } catch {}
+
+    return () => {
+      try { bc?.close(); } catch {}
+    };
+  }, []);
+
   useEffect(() => {
     if (isAuthenticated) fetchTournaments();
   }, [isAuthenticated, fetchTournaments]);
@@ -803,6 +846,7 @@ const Admin: React.FC = () => {
   const normalizeCategory = useCallback((value: any): string => {
     const v = String(value || '').trim().toLowerCase().replace(/[-_\s]+/g, '');
     if (!v) return '';
+    if (v === 'elite') return 'Elite';
     if (v === 'wkbatsman' || v === 'wicketkeeperbatsman' || v === 'wk' || v === 'wicketkeeper') return 'WK Batsman';
     if (v === 'allrounder' || v === 'allround' || v === 'all') return 'All-rounder';
     if (v === 'bowler' || v.startsWith('bowl')) return 'Bowler';
@@ -813,6 +857,120 @@ const Admin: React.FC = () => {
     const raw = p?.category ?? p?.player_category ?? p?.role;
     return normalizeCategory(raw);
   }, [normalizeCategory]);
+  // Effective category ensures a player appears in only one category in Live Auction
+  // Priority: Elite (base_price >= 1000) > other normalized categories
+  const getEffectiveCategory = useCallback((p: any) => {
+    const basePrice = Number(p?.base_price ?? p?.basePrice ?? 0) || 0;
+    if (basePrice >= 1000) return 'Elite';
+    return getPlayerCategory(p);
+  }, [getPlayerCategory]);
+
+  // Get category-wise sections for Auction Players (5 players per section, 6 for Titanium sections in non-Elite categories)
+  const getCategoryWiseSections = useCallback(() => {
+    const perSection = 5;
+    const perSectionTitanium = 6; // Last 2 sections (Titanium-I, Titanium-II) have 6 players for non-Elite categories
+    const toBasePrice = (p: any) => Number(p.base_price ?? p.basePrice ?? 0) || 0;
+    
+    // Separate uncertain players
+    const uncertainPlayers = confirmedAuctionPlayers.filter((player: any) => {
+      return player.availability_uncertain === true || 
+             player.availability_status === 'uncertain' || 
+             player.is_uncertain === true ||
+             player.uncertain === true ||
+             String(player.availability_status || '').toLowerCase() === 'uncertain';
+    });
+    
+    // Group regular players by category (excluding uncertain players)
+    const playersByCategory: Record<string, any[]> = {};
+    
+    confirmedAuctionPlayers.forEach((player: any) => {
+      // Skip uncertain players
+      const isUncertain = player.availability_uncertain === true || 
+                          player.availability_status === 'uncertain' || 
+                          player.is_uncertain === true ||
+                          player.uncertain === true ||
+                          String(player.availability_status || '').toLowerCase() === 'uncertain';
+      if (isUncertain) return;
+      
+      const category = getEffectiveCategory(player) || 'Unknown';
+      if (!playersByCategory[category]) {
+        playersByCategory[category] = [];
+      }
+      playersByCategory[category].push(player);
+    });
+    
+    // Sort each category by base price (highest first) and create sections
+    const allSections: { category: string; key: string; label: string; players: any[] }[] = [];
+    
+    // Process categories in priority order: Elite first, then others
+    const categoryOrder = ['Elite', 'Batter', 'Bowler', 'All-rounder', 'WK Batsman', 'Unknown'];
+    
+    categoryOrder.forEach(category => {
+      if (!playersByCategory[category] || playersByCategory[category].length === 0) return;
+      
+      const categoryPlayers = playersByCategory[category]
+        .sort((a: any, b: any) => toBasePrice(b) - toBasePrice(a));
+      
+      // Create sections - Elite always uses 5 per section, others use 5 for most sections and 6 for Titanium sections
+      const lettersAZ = Array.from({ length: 10 }, (_, i) => String.fromCharCode(65 + i)); // A..J
+      const isElite = category === 'Elite';
+      
+      let currentIndex = 0;
+      let sectionIndex = 0;
+      
+      while (currentIndex < categoryPlayers.length && sectionIndex < lettersAZ.length) {
+        const letter = lettersAZ[sectionIndex];
+        const isTitaniumSection = letter === 'I' || letter === 'J'; // Titanium-I and Titanium-II
+        
+        // Determine section size: Elite always 5, others: 6 for Titanium sections, 5 for others
+        const sectionSize = isElite ? perSection : (isTitaniumSection ? perSectionTitanium : perSection);
+        const sectionPlayers = categoryPlayers.slice(currentIndex, currentIndex + sectionSize);
+        
+        if (sectionPlayers.length > 0) {
+          allSections.push({
+            category,
+            key: `${category}-${letter}`,
+            label: `${category} - ${SECTION_LABELS[letter] || `Section ${letter}`}`,
+            players: sectionPlayers,
+          });
+        }
+        
+        currentIndex += sectionSize;
+        sectionIndex++;
+      }
+    });
+    
+    // Add uncertain players section if any exist
+    if (uncertainPlayers.length > 0) {
+      const sortedUncertain = uncertainPlayers.sort((a: any, b: any) => toBasePrice(b) - toBasePrice(a));
+      allSections.push({
+        category: 'Availability Uncertain',
+        key: 'uncertain-players',
+        label: 'Uncertain Players',
+        players: sortedUncertain,
+      });
+    }
+    
+    return allSections;
+  }, [confirmedAuctionPlayers, getEffectiveCategory]);
+
+  // Get sections filtered by category for Live Auction
+  const getLiveAuctionSections = useCallback((category: string) => {
+    const allSections = getCategoryWiseSections();
+    if (!category || category === 'All') {
+      return allSections;
+    }
+    // Handle "Availability Uncertain" category
+    if (category === 'Availability Uncertain') {
+      return allSections.filter(section => section.category === 'Availability Uncertain');
+    }
+    const normalizedCategory = normalizeCategory(category);
+    return allSections.filter(section => {
+      const sectionCategory = normalizeCategory(section.category);
+      return sectionCategory === normalizedCategory;
+    });
+  }, [getCategoryWiseSections, normalizeCategory]);
+
   // Bid amount helpers for inline +/- controls
   const parseLiveAmount = useCallback((): number => {
     const n = parseInt(String(liveAmount || '0'), 10);
@@ -850,77 +1008,76 @@ const Admin: React.FC = () => {
       available: toNum(payload.available_slots ?? payload.available ?? payload.available_player ?? payload.available_players ?? payload.availableCount),
     };
   }, []);
-  // Section label mapping: A→Diamond, B→Platinum, etc.
-  const SECTION_LABELS: Record<string, string> = {
-    'A': 'Elite',
-    'B': 'Platinum',
-    'C': 'Diamond',
-    'D': 'Gold-I',
-    'E': 'Gold-II',
-    'F': 'Silver-I',
-    'G': 'Silver-II',
-    'H': 'Bronze-I',
-    'I': 'Bronze-II',
-    'J': 'Titanium-I',
-    'K': 'Titanium-II',
-  };
+// --- SECTION LABELS ---
+const SECTION_LABELS: Record<string, string> = {
+  'A': 'Platinum',
+  'B': 'Diamond',
+  'C': 'Gold-I',
+  'D': 'Gold-II',
+  'E': 'Silver-I',
+  'F': 'Silver-II',
+  'G': 'Bronze-I',
+  'H': 'Bronze-II',
+  'I': 'Titanium-I',
+  'J': 'Titanium-II',
+  
+};
   // Build sections A..J with 5 players per section, ordered by highest base price
   // Special handling for STAR category: shows only one section with 5 players
   // For other categories: Players are distributed into sections based purely on base_price ranking
-  const getSectionedPlayers = useCallback((categoryLabel: string) => {
-    const perSection = 5;
-    const toBasePrice = (p: any) => Number(p.base_price ?? p.basePrice ?? 0) || 0;
-   
-    // Special handling for STAR category
-    if (categoryLabel === 'ELITE') {
-  // Filter players by start_players = 'A' (ELITE position) only
-  const elitePlayers = livePlayers
-    .filter((p: any) => {
-      const startPos = String(p.start_players || '').trim().toUpperCase();
-      return startPos === 'A' || startPos === 'ELITE';
-    })
-    .sort((a: any, b: any) => toBasePrice(b) - toBasePrice(a));
-
-  // Return single Elite section with up to 5 players
-  return [{
-    key: 'ELITE',
-    label: 'Elite Players',
-    players: elitePlayers.slice(0, perSection),
-  }];
-}
-   
-    // For other categories: Batter, Bowler, All-rounder, WK Batsman
-    // Filter by category and sort by base_price (highest first)
+// Build sections A..J with 5 players per section, ordered by highest base price
+// Special handling for Elite category: shows only players with base_price >= 1000
+const getSectionedPlayers = useCallback((categoryLabel: string) => {
+  const perSection = 5;
+  const toBasePrice = (p: any) => Number(p.base_price ?? p.basePrice ?? 0) || 0;
+ 
+  // Special handling for Elite category - only show players with base_price >= 1000
+  if (String(categoryLabel).trim().toLowerCase() === 'elite') {
     const blacklistSet = new Set(readSoldBlacklist());
-    const categoryFiltered = livePlayers
-      .filter((p: any) => {
-        const playerCategory = getPlayerCategory(p);
-        return playerCategory === normalizeCategory(categoryLabel);
-      })
-      // Extra guard: filter out blacklisted (in case livePlayers wasn't refreshed yet)
-      .filter((p:any) => !blacklistSet.has(String(p.id)))
-      .sort((a: any, b: any) => toBasePrice(b) - toBasePrice(a)); // Sort by base_price descending
+    const elitePlayers = livePlayers
+      .filter((p: any) => toBasePrice(p) >= 1000)
+      .filter((p: any) => !blacklistSet.has(String(p.id)))
+      .sort((a: any, b: any) => toBasePrice(b) - toBasePrice(a));
+
+    return [{
+      key: 'ELITE',
+      label: 'Elite Players (Base Price ≥ 1000)',
+      players: elitePlayers.slice(0, perSection),
+    }];
+  }
    
-    // Distribute players into sections based on base_price ranking
-    // Top 5 → Diamond, Next 5 → Platinum, etc.
-    const lettersAZ = Array.from({ length: 10 }, (_, i) => String.fromCharCode(65 + i)); // A..J
-    const sections: { key: string; label: string; players: any[] }[] = [];
+  // For other categories: Batter, Bowler, All-rounder, WK Batsman
+  // Filter by category and sort by base_price (highest first)
+  const blacklistSet = new Set(readSoldBlacklist());
+  const categoryFiltered = livePlayers
+    .filter((p: any) => {
+      const playerCategory = getEffectiveCategory(p);
+      return playerCategory === normalizeCategory(categoryLabel);
+    })
+    // Extra guard: filter out blacklisted (in case livePlayers wasn't refreshed yet)
+    .filter((p:any) => !blacklistSet.has(String(p.id)))
+    .sort((a: any, b: any) => toBasePrice(b) - toBasePrice(a)); // Sort by base_price descending
    
-    for (let i = 0; i < categoryFiltered.length && sections.length < lettersAZ.length; i += perSection) {
-      const letter = lettersAZ[sections.length];
-      const sectionPlayers = categoryFiltered.slice(i, i + perSection);
-     
-      if (sectionPlayers.length > 0) {
-        sections.push({
-          key: letter,
-          label: SECTION_LABELS[letter] || `Section ${letter}`,
-          players: sectionPlayers,
-        });
-      }
+  // Distribute players into sections based on base_price ranking
+  // Top 5 → Diamond, Next 5 → Platinum, etc.
+  const lettersAZ = Array.from({ length: 10 }, (_, i) => String.fromCharCode(65 + i)); // A..J
+  const sections: { key: string; label: string; players: any[] }[] = [];
+   
+  for (let i = 0; i < categoryFiltered.length && sections.length < lettersAZ.length; i += perSection) {
+    const letter = lettersAZ[sections.length];
+    const sectionPlayers = categoryFiltered.slice(i, i + perSection);
+   
+    if (sectionPlayers.length > 0) {
+      sections.push({
+        key: letter,
+        label: SECTION_LABELS[letter] || `Section ${letter}`,
+        players: sectionPlayers,
+      });
     }
+  }
    
-    return sections;
-  }, [livePlayers, readSoldBlacklist, getPlayerCategory, normalizeCategory]);
+  return sections;
+}, [livePlayers, readSoldBlacklist, getPlayerCategory, normalizeCategory]);
   
   // Moved out of conditional render to satisfy React Hooks rules
   const handleUpdatePlayerInfo = useCallback(async (updatedData: any) => {
@@ -1055,17 +1212,35 @@ const Admin: React.FC = () => {
   return (
     <div className="flex flex-col min-h-screen bg-gray-50">
       <header className="bg-red-600 text-white h-16 flex items-center justify-between px-4 md:px-6">
-        <h1 className="text-xl font-bold">CPL Admin</h1>
-        <Button className="bg-yellow-500 text-red-600" onClick={() => {
-          localStorage.removeItem("auth_token");
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+            className="md:hidden p-2 hover:bg-red-700 rounded-lg transition"
+            aria-label="Toggle menu"
+          >
+            {mobileMenuOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
+          </button>
+          <h1 className="text-lg sm:text-xl font-bold">CPL Admin</h1>
+        </div>
+        <Button className="bg-yellow-500 text-red-600 text-sm sm:text-base px-3 sm:px-4 py-2" onClick={() => {
+          clearAuthTokens();
           setIsAuthenticated(false);
           toast.success("Logged out");
         }}>
-          <LogOut className="h-4 w-4 inline mr-1" /> Logout
+          <LogOut className="h-4 w-4 inline mr-1" /> <span className="hidden sm:inline">Logout</span>
         </Button>
       </header>
-      <div className="flex flex-1">
-        <aside className="bg-blue-900 w-64 p-4 hidden md:block">
+      <div className="flex flex-1 relative">
+        {/* Mobile Menu Overlay */}
+        {mobileMenuOpen && (
+          <div 
+            className="fixed inset-0 bg-black/50 z-40 md:hidden"
+            onClick={() => setMobileMenuOpen(false)}
+          />
+        )}
+        <aside className={`bg-blue-900 w-64 p-4 fixed md:static inset-y-0 left-0 z-50 transform transition-transform duration-300 ${
+          mobileMenuOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
+        }`}>
           <nav>
             {[
               { id: "tournaments", label: "Tournaments", icon: Trophy },
@@ -1078,7 +1253,10 @@ const Admin: React.FC = () => {
             ].map(item => (
               <button
                 key={item.id}
-                onClick={() => setActiveSection(item.id)}
+                onClick={() => {
+                  setActiveSection(item.id);
+                  setMobileMenuOpen(false);
+                }}
                 className={`w-full text-left text-white py-3 px-4 flex items-center gap-3 hover:bg-blue-800 rounded-lg transition ${activeSection === item.id ? 'bg-blue-800' : ''}`}
               >
                 <item.icon className="h-5 w-5" />
@@ -1087,7 +1265,7 @@ const Admin: React.FC = () => {
             ))}
           </nav>
         </aside>
-        <main className="flex-1 p-4 md:p-8 overflow-auto">
+        <main className="flex-1 p-3 sm:p-4 md:p-6 lg:p-8 overflow-auto">
           {/* === TOURNAMENT SECTION === */}
           {activeSection === "tournaments" && (
             <>
@@ -1467,27 +1645,27 @@ const Admin: React.FC = () => {
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 lg:gap-7">
                 {/* Center lanes - Section A..Z built by category */}
                 <div className="lg:col-span-8 col-span-1">
-                  {loadingLivePlayers ? (
+                  {loadingAuctionPlayers ? (
                     <Card className="border-0 shadow-lg">
                       <CardContent>
                         <p className="text-center py-6 text-gray-600">Loading players...</p>
                       </CardContent>
                     </Card>
-                  ) : getSectionedPlayers(liveCategory).length === 0 ? (
+                  ) : getLiveAuctionSections(liveCategory).length === 0 ? (
                     <Card className="border-0 shadow-lg">
                       <CardContent>
-                        <div className="text-sm text-gray-600">No players found for {liveCategory}. Try another tournament or category.</div>
+                        <div className="text-sm text-gray-600">No players found for {liveCategory === 'All' ? 'selected auction players' : liveCategory}. Select players for auction first or try another category.</div>
                       </CardContent>
                     </Card>
                   ) : (
-                    getSectionedPlayers(liveCategory).map(section => (
+                    getLiveAuctionSections(liveCategory).map(section => (
                       <Card key={section.key} className="mb-6 border-0 shadow-xl bg-gradient-to-br from-white to-indigo-50/60">
                         <CardContent className="p-4 md:p-6">
                           <h3 className="font-semibold mb-3 text-indigo-700">{section.label || `Section ${section.key}`}</h3>
                           <div className="space-y-3">
                             {section.players.map((p:any) => (
                               <div
-                                key={p.id}
+                                key={p.auction_player_id || p.id || `${section.key}-${p.name}`}
                                 className="h-14 rounded-lg border border-indigo-100 bg-white/90 flex items-center px-4 justify-between cursor-pointer hover:bg-indigo-50 transition-colors shadow-sm"
                                 onClick={() => {
                                   setLastClickedPlayer({ id: p.id, name: p.name || p.player_name, base_price: (p.base_price ?? p.basePrice ?? 0), auction_player_id: p.auction_player_id });
@@ -1546,9 +1724,11 @@ const Admin: React.FC = () => {
                     <CardContent className="p-4 md:p-6">
                       <Label>Category</Label>
                       <Select value={liveCategory} onChange={e => setLiveCategory(e.target.value)}>
+                        <option value="All">All Categories</option>
                         {['Elite','Batter','Bowler','All-rounder','WK Batsman'].map(c => (
                           <option key={c} value={c}>{c}</option>
                         ))}
+                        <option value="Availability Uncertain">Availability Uncertain</option>
                       </Select>
                       <div className="h-4" />
                       <Label>Bid Amount</Label>
@@ -1580,7 +1760,7 @@ const Admin: React.FC = () => {
                         </Button>
                       </div>
                       <div className="flex flex-wrap gap-2 mt-2">
-                        {[100,200,500,1000].map(v => (
+                        {[25,50,100,500,1000].map(v => (
                           <button
                             key={v}
                             className="px-3 py-1 text-sm rounded-full bg-white border border-indigo-200 text-indigo-700 hover:bg-indigo-50"
@@ -2003,52 +2183,62 @@ const Admin: React.FC = () => {
                 </CardContent>
               </Card>
              
-              {/* Selected Auction Players List */}
+              {/* Selected Auction Players List - Category Wise Sections */}
               <Card className="mb-6">
                 <CardContent>
-                  <Label>Selected Auction players:</Label>
+                  <Label>Selected Auction Players (Category Wise Sections - 5 players per section):</Label>
                   {loadingAuctionPlayers ? (
                     <p className="text-center py-4">Loading players...</p>
                   ) : confirmedAuctionPlayers.length === 0 ? (
                     <p className="text-center py-4 text-gray-500">No selected auction players</p>
                   ) : (
-                    <div
-                      className="space-y-3 max-h-80 overflow-y-auto"
-                      onScroll={handleScrollConfirmed}
-                    >
-                      {displayedConfirmedPlayers.map(player => (
-                        <div
-                          key={player.auction_player_id || player.id}
-                          className="flex justify-between items-center p-4 bg-green-50 rounded-lg border border-green-200 hover:bg-green-100 transition-colors cursor-pointer"
-                          onClick={() => setSelectedUpdatePlayer(player)}
-                        >
-                          <div className="flex items-center gap-3 flex-1">
-                            {/* Player Image in Auction Players Section */}
-                            <img
-                              src={getPlayerImageUrl(player.photo_url)}
-                              alt={player.name}
-                              className="w-12 h-12 rounded-full object-cover border border-gray-300"
-                              onError={(e) => {
-                                const target = e.target as HTMLImageElement;
-                                target.src = buildUrl('/api/v1/player/profile/default.png');
-                              }}
-                            />
-                            <div>
-                              <p className="font-semibold">{player.name}</p>
-                              <p className="text-sm text-gray-600">{player.email} • {player.category}</p>
-                            </div>
+                    <div className="space-y-6 max-h-[600px] overflow-y-auto mt-4">
+                      {getCategoryWiseSections().map(section => (
+                        <div key={section.key} className="border border-gray-200 rounded-lg p-4 bg-gradient-to-br from-white to-gray-50">
+                          <h3 className="text-lg font-bold mb-3 text-blue-700 border-b border-blue-200 pb-2">
+                            {section.label} ({section.players.length} players)
+                          </h3>
+                          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                            {section.players.map((player: any) => (
+                              <div
+                                key={player.auction_player_id || player.id}
+                                className="flex items-center gap-3 p-3 bg-white rounded-lg border border-gray-200 hover:bg-green-50 hover:border-green-300 transition-colors cursor-pointer shadow-sm"
+                                onClick={() => setSelectedUpdatePlayer(player)}
+                              >
+                                {/* Player Image */}
+                                <img
+                                  src={getPlayerImageUrl(player.photo_url)}
+                                  alt={player.name}
+                                  className="w-12 h-12 rounded-full object-cover border border-gray-300 flex-shrink-0"
+                                  onError={(e) => {
+                                    const target = e.target as HTMLImageElement;
+                                    target.src = buildUrl('/api/v1/player/profile/default.png');
+                                  }}
+                                />
+                                <div className="flex-1 min-w-0">
+                                  <p className="font-semibold text-sm truncate">{player.name || player.player_name || 'Unknown Player'}</p>
+                                  <p className="text-xs text-gray-600 truncate">{player.email || 'No email'}</p>
+                                  <p className="text-xs text-blue-600 font-medium mt-1">
+                                    Base: ৳{Number(player.base_price || 0).toLocaleString()}
+                                  </p>
+                                  {player.start_players && (
+                                    <p className="text-xs text-purple-600">Pos: {player.start_players}</p>
+                                  )}
+                                </div>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="text-red-600 border-red-300 hover:bg-red-50 flex-shrink-0"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleRemovePlayer(player.auction_player_id || player.id);
+                                  }}
+                                >
+                                  <X className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            ))}
                           </div>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="text-red-600 border-red-300 hover:bg-red-50"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleRemovePlayer(player.auction_player_id || player.id);
-                            }}
-                          >
-                            Remove
-                          </Button>
                         </div>
                       ))}
                     </div>
