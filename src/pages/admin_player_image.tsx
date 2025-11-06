@@ -435,7 +435,7 @@ export const AdminPlayerImage: React.FC<AdminPlayerImageProps> = ({ player, onCl
               <img
                 src={imageUrl}
                 alt={livePlayer.name || "Player"}
-                className="w-full h-full object-cover rounded-lg sm:rounded-xl shadow-2xl"
+                className="w-full h-full object-contain rounded-lg sm:rounded-xl shadow-2xl"
                 onError={(e) => {
                   e.currentTarget.src = buildUrl('/api/v1/player/profile/default.png');
                 }}
