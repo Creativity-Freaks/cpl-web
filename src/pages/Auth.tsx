@@ -10,7 +10,7 @@ import { toast } from "sonner";
 import { useAuth } from "@/context/useAuth";
 import { useLocation, useNavigate } from "react-router-dom";
 // Avatar selection for registration has been removed; users can upload from Settings
-import heroImg from "@/assets/hero-cricket.jpg";
+import heroImg from "@/assets/team-celebration.jpg";
 import { Switch } from "@/components/ui/switch";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -84,7 +84,10 @@ const Auth: React.FC<AuthProps> = ({ initialTab, compact = false, onSuccess }) =
 
   const handleRegister = registerForm.handleSubmit(async (values) => {
     try {
-      await register({ name: values.name, email: values.email, password: values.password });
+      await register({
+        name: values.name, email: values.email, password: values.password,
+        category: ""
+      });
       toast.success("Registration successful");
       onSuccess?.();
       navigate("/dashboard");

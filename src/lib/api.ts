@@ -416,6 +416,21 @@ export function getAuthToken(): string | null {
   }
 }
 
+// Global logout handler for session expiry
+let globalLogoutHandler: (() => void) | null = null;
+export function setGlobalLogoutHandler(handler: () => void) {
+  globalLogoutHandler = handler;
+}
+
+// Clear auth tokens
+export function clearAuthTokens() {
+  try {
+    localStorage.removeItem(ACCESS_TOKEN_KEY_PRIMARY);
+    localStorage.removeItem(ACCESS_TOKEN_KEY_FALLBACK);
+    localStorage.removeItem("cpl_current_user");
+  } catch {}
+}
+
 async function apiFetchJson<T>(path: string, init?: JsonInit): Promise<T> {
   const { body, headers, ...rest } = init || {};
   const token = getAuthToken();
@@ -424,6 +439,24 @@ async function apiFetchJson<T>(path: string, init?: JsonInit): Promise<T> {
     body: body !== undefined ? JSON.stringify(body) : undefined,
     ...rest,
   });
+  
+  // Check for session expiry (401 Unauthorized or 403 Forbidden)
+  if (res.status === 401 || res.status === 403) {
+    // Clear tokens
+    clearAuthTokens();
+    // Trigger global logout handler if set
+    if (globalLogoutHandler) {
+      globalLogoutHandler();
+    }
+    // Also trigger logout via BroadcastChannel for cross-tab communication
+    try {
+      const bc = new BroadcastChannel('auth-updates');
+      bc.postMessage({ type: 'session-expired' });
+      bc.close();
+    } catch {}
+    throw new Error('Session expired. Please login again.');
+  }
+  
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
   // Handle 204 No Content
   if (res.status === 204) return undefined as unknown as T;
@@ -456,6 +489,21 @@ export async function uploadPlayerProfileImage(file: File): Promise<unknown> {
   fd.set("file", file);
   const token = getAuthToken();
   const res = await fetch(buildUrl(API_PATHS.uploadPlayerProfile), { method: "POST", headers: token ? { Authorization: `Bearer ${token}` } : undefined, body: fd });
+  
+  // Check for session expiry
+  if (res.status === 401 || res.status === 403) {
+    clearAuthTokens();
+    if (globalLogoutHandler) {
+      globalLogoutHandler();
+    }
+    try {
+      const bc = new BroadcastChannel('auth-updates');
+      bc.postMessage({ type: 'session-expired' });
+      bc.close();
+    } catch {}
+    throw new Error('Session expired. Please login again.');
+  }
+  
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
   return await res.json();
 }
@@ -487,7 +535,7 @@ export async function getPlayerProfiles(): Promise<PlayerProfile | PlayerProfile
 
 export function extractFilename(pathLike: string): string {
   // Handles values like "app/photo/player/abc.png" or just "abc.png"
-  const parts = String(pathLike).split("/");
+  const parts = String(pathLike).split("\\");
   return parts[parts.length - 1] || String(pathLike);
 }
 

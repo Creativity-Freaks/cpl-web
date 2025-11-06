@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { AuthContext, AuthContextValue, User, Credentials } from './auth-shared';
-import { login as apiLogin, registerUser as apiRegister, getAuthToken, fetchCurrentPlayerProfile } from "@/lib/api";
+import { login as apiLogin, registerUser as apiRegister, getAuthToken, fetchCurrentPlayerProfile, setGlobalLogoutHandler, clearAuthTokens } from "@/lib/api";
 
 const STORAGE_USERS = "cpl_users";
 const STORAGE_CURRENT = "cpl_current_user";
@@ -105,11 +105,37 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const logout = async () => {
     try {
-      localStorage.removeItem(ACCESS_TOKEN_KEY);
+      clearAuthTokens();
     } finally {
       persistCurrent(null);
     }
   };
+
+  // Set up global logout handler for session expiry
+  useEffect(() => {
+    setGlobalLogoutHandler(() => {
+      persistCurrent(null);
+      // Redirect to login page if we're in a protected route
+      if (window.location.pathname !== '/auth' && !window.location.pathname.startsWith('/admin')) {
+        window.location.href = '/auth';
+      }
+    });
+
+    // Listen for session expiry from BroadcastChannel
+    let bc: BroadcastChannel | null = null;
+    try {
+      bc = new BroadcastChannel('auth-updates');
+      bc.onmessage = (ev: MessageEvent) => {
+        if (ev.data?.type === 'session-expired') {
+          logout();
+        }
+      };
+    } catch {}
+
+    return () => {
+      try { bc?.close(); } catch {}
+    };
+  }, []);
 
   const updateUser = async (patch: Partial<User>) => {
     // Without a dedicated profile API, update only local state for now.
