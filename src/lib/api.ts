@@ -145,14 +145,35 @@ export type HomeStats = { players: number; teams: number; matches: number; prize
 
 export const fetchHomeStats = async (): Promise<HomeStats> => {
   try {
-    const [teamsResp, playersResp, matchesResp] = await Promise.all([
-      fetch(buildUrl("/api/v1/admin/teams/count")),
-      fetch(buildUrl("/api/v1/admin/players/count")),
-      fetch(buildUrl("/api/v1/admin/matches/count")),
+    // Requirement: Teams count is static 5; Players count from /api/v1/adminall/players
+    // Keep matches count best-effort from existing endpoint, and fixed prize pool.
+    const [playersList, matchesResp] = await Promise.all([
+      // Use helper that handles auth headers and errors
+      (async () => {
+        try { return await getAdminAllPlayers(); } catch { return null as unknown; }
+      })(),
+      fetch(buildUrl("/api/v1/admin/matches/count")).catch(() => null as unknown as Response),
     ]);
-    const teams = teamsResp.ok ? Number(await teamsResp.json()) : 0;
-    const players = playersResp.ok ? Number(await playersResp.json()) : 0;
-    const matches = matchesResp.ok ? Number(await matchesResp.json()) : 0;
+    const extractCountFromUnknown = (val: unknown): number => {
+      if (Array.isArray(val)) return val.length;
+      if (val && typeof val === 'object') {
+        const obj = val as Record<string, unknown>;
+        // Common shape: { data: [...] }
+        if ('data' in obj) {
+          const data = (obj as { data?: unknown }).data;
+          if (Array.isArray(data)) return data.length;
+        }
+        // New provided shape: { total_players: number, all_player_list: [...] }
+        const maybeTotal = obj['total_players'];
+        if (typeof maybeTotal === 'number' && Number.isFinite(maybeTotal)) return maybeTotal;
+        const list = obj['all_player_list'] as unknown;
+        if (Array.isArray(list)) return list.length;
+      }
+      return 0;
+    };
+    const players = extractCountFromUnknown(playersList);
+    const matches = matchesResp && (matchesResp as Response).ok ? Number(await (matchesResp as Response).json()) : 0;
+    const teams = 5;
     const prizePool = 50000;
     return { teams, players, matches, prizePool };
   } catch (_) {
