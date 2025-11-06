@@ -1,6 +1,6 @@
 // Central API configuration
 // Change only API_BASE to point to your backend. Keep it without trailing slash.
-export const API_BASE = "https://club.cse.pstu.ac.bd:2125/";
+export const API_BASE = "https://club.cse.pstu.ac.bd:2125";
 
 // FastAPI default OAuth2PasswordRequestForm token route is usually "/token".
 // If your backend exposes a different path, change it here once.
@@ -14,5 +14,3 @@ export function buildUrl(path: string): string {
   const p = path.startsWith("/") ? path : `/${path}`;
   return `${base}${p}`;
 }
-
-
