@@ -5,7 +5,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { ChevronLeft, ChevronRight, Download, Link as LinkIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { fetchAllTournaments, fetchTournamentImages, type UITournament } from "@/lib/api";
+import { fetchAllTournaments, fetchTournamentImages, fetchImageAsObjectUrl, type UITournament } from "@/lib/api";
 
 const GalleryPage = () => {
   const [tournaments, setTournaments] = useState<UITournament[]>([]);
@@ -146,6 +146,35 @@ const GalleryPage = () => {
                         loading="lazy"
                         alt={`Gallery ${index + 1}`}
                         className="w-full h-full object-cover cursor-zoom-in"
+                        crossOrigin="anonymous"
+                        referrerPolicy="no-referrer"
+                        onError={async (e) => {
+                          const el = e.currentTarget as HTMLImageElement;
+                          // Try alternate endpoint spelling once
+                          if (el.dataset.altTried !== '1') {
+                            el.dataset.altTried = '1';
+                            if (el.src.includes('/tounament/')) {
+                              el.src = el.src.replace('/tounament/', '/tournament/');
+                              return;
+                            }
+                            if (el.src.includes('/tournament/')) {
+                              el.src = el.src.replace('/tournament/', '/tounament/');
+                              return;
+                            }
+                          }
+                          // Fetch as blob with auth/accept JSON as a last resort
+                          try {
+                            const url = await fetchImageAsObjectUrl(el.src);
+                            if (url) {
+                              el.src = url;
+                              return;
+                            }
+                          } catch (err) {
+                            // ignore and hide below
+                          }
+                          // Hide broken image as last resort
+                          el.style.display = 'none';
+                        }}
                         onClick={() => openLightbox(index)}
                       />
                       <div className="absolute inset-0 bg-gradient-to-t from-primary/90 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end">
@@ -191,10 +220,38 @@ const GalleryPage = () => {
 
       {/* Lightbox */}
       <Dialog open={lightboxOpen} onOpenChange={setLightboxOpen}>
-        <DialogContent className="max-w-5xl p-0 bg-black/95 border-0">
+        <DialogContent aria-describedby={undefined} className="max-w-5xl p-0 bg-black/95 border-0">
           {images.length > 0 && (
             <div className="relative w-full">
-              <img src={images[lightboxIndex]} alt="preview" className="w-full max-h-[80vh] object-contain select-none" />
+              <img
+                src={images[lightboxIndex]}
+                alt="preview"
+                className="w-full max-h-[80vh] object-contain select-none"
+                crossOrigin="anonymous"
+                referrerPolicy="no-referrer"
+                onError={async (e) => {
+                  const el = e.currentTarget as HTMLImageElement;
+                  if (el.dataset.altTried !== '1') {
+                    el.dataset.altTried = '1';
+                    if (el.src.includes('/tounament/')) {
+                      el.src = el.src.replace('/tounament/', '/tournament/');
+                      return;
+                    }
+                    if (el.src.includes('/tournament/')) {
+                      el.src = el.src.replace('/tournament/', '/tounament/');
+                      return;
+                    }
+                  }
+                  // Try blob fetch fallback
+                  try {
+                    const url = await fetchImageAsObjectUrl(el.src);
+                    if (url) { el.src = url; return; }
+                  } catch (err) {
+                    // ignore and hide below
+                  }
+                  el.style.display = 'none';
+                }}
+              />
               {/* Controls */}
               <button aria-label="Previous" onClick={prevImage} className="absolute left-2 top-1/2 -translate-y-1/2 p-2 rounded-full bg-white/10 hover:bg-white/20 text-white">
                 <ChevronLeft />

@@ -82,6 +82,17 @@ const PlayerDashboard = () => {
                     src={profileImage}
                     alt="Profile"
                     className="w-full max-h-[70vh] object-contain rounded-lg shadow-glow"
+                    crossOrigin="anonymous"
+                    referrerPolicy="no-referrer"
+                    onError={async (e) => {
+                      try {
+                        const el = e.currentTarget as HTMLImageElement;
+                        const { fetchImageAsObjectUrl } = await import("@/lib/api");
+                        const url = await fetchImageAsObjectUrl(el.src);
+                        if (url) { el.src = url; return; }
+                      } catch {/* ignore */}
+                      e.currentTarget.style.display = 'none';
+                    }}
                   />
                 ) : (
                   <p className="text-sm text-muted-foreground">No profile image uploaded yet.</p>

@@ -3,8 +3,9 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { X, Star, Trophy, Calendar, Award } from 'lucide-react';
+import { buildUrl } from '../config/api';
 
-const API_BASE = "http://192.168.0.113:8000";
+const API_BASE = ""; // Prefer buildUrl for environment-aware base
 
 interface PlayerDetails {
   name: string;
@@ -41,7 +42,7 @@ export const AdminAuctionPlayerDetails: React.FC<AdminAuctionPlayerDetailsProps>
         const token = localStorage.getItem("auth_token");
         
         // Fetch all players since single endpoint returns 404
-        const response = await fetch(`${API_BASE}/api/v1/adminall/players`, {
+  const response = await fetch(buildUrl(`/api/v1/adminall/players`), {
           headers: {
             "Authorization": `Bearer ${token}`,
             "Content-Type": "application/json",
@@ -62,11 +63,13 @@ export const AdminAuctionPlayerDetails: React.FC<AdminAuctionPlayerDetailsProps>
         }
 
         // Map to details interface; use available fields, fallback for missing ones
+        // Build robust image URL from filename only
+        const photoUrl: string | null = playerData.photo_url && playerData.photo_url !== 'null' ? String(playerData.photo_url) : null;
+        const filename = photoUrl ? String(photoUrl).split(/[/\\]/).pop() : null;
+        const imageUrl = filename ? buildUrl(`/api/v1/player/profile/${filename}`) : 'https://images.unsplash.com/photo-1543326727-cf6c39e8f84c?w=400&h=400&fit=crop&crop=face';
         setDetails({
           name: playerData.name || 'Unknown Player',
-          image: playerData.photo_url && playerData.photo_url !== 'null' 
-            ? `${API_BASE}/api/v1/player/profile/${playerData.photo_url}` 
-            : 'https://images.unsplash.com/photo-1543326727-cf6c39e8f84c?w=400&h=400&fit=crop&crop=face',
+          image: imageUrl,
           basePrice: playerData.base_price || '$0', // Assume field; adjust if different
           category: playerData.category || 'Unknown',
           session: playerData.session || '2026', // Assume field
@@ -171,8 +174,16 @@ export const AdminAuctionPlayerDetails: React.FC<AdminAuctionPlayerDetailsProps>
                     src={details.image}
                     alt={details.name}
                     className="w-full h-full object-cover transform group-hover:scale-105 transition-transform duration-500"
-                    onError={(e) => {
-                      e.currentTarget.src = 'https://images.unsplash.com/photo-1543326727-cf6c39e8f84c?w=400&h=400&fit=crop&crop=face';
+                    crossOrigin="anonymous"
+                    referrerPolicy="no-referrer"
+                    onError={async (e) => {
+                      const el = e.currentTarget as HTMLImageElement;
+                      try {
+                        const { fetchImageAsObjectUrl } = await import('@/lib/api');
+                        const blob = await fetchImageAsObjectUrl(el.src);
+                        if (blob) { el.src = blob; return; }
+                      } catch {/* ignore */}
+                      el.src = 'https://images.unsplash.com/photo-1543326727-cf6c39e8f84c?w=400&h=400&fit=crop&crop=face';
                     }}
                   />
                   <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>

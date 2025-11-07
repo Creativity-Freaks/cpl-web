@@ -18,9 +18,41 @@ Avatar.displayName = AvatarPrimitive.Root.displayName;
 const AvatarImage = React.forwardRef<
   React.ElementRef<typeof AvatarPrimitive.Image>,
   React.ComponentPropsWithoutRef<typeof AvatarPrimitive.Image>
->(({ className, ...props }, ref) => (
-  <AvatarPrimitive.Image ref={ref} className={cn("aspect-square h-full w-full", className)} {...props} />
-));
+>(({ className, onError, crossOrigin, referrerPolicy, ...props }, ref) => {
+  const handleError: React.ComponentPropsWithoutRef<typeof AvatarPrimitive.Image>["onError"] = async (e) => {
+    const el = e.currentTarget as HTMLImageElement;
+    try {
+      const { fetchImageAsObjectUrl } = await import("@/lib/api");
+      const url = await fetchImageAsObjectUrl(el.src);
+      if (url) {
+        el.src = url;
+        return;
+      }
+    } catch {
+      // ignore and fall through to user handler
+    }
+    // Last resort: strip any nested path segments leaving only filename
+    if (/\/player\/profile\//.test(el.src)) {
+      const file = el.src.split('/').pop() || '';
+      if (file && el.dataset.fallbackApplied !== '1') {
+        el.dataset.fallbackApplied = '1';
+        el.src = el.src.replace(/\/player\/profile\/.*/, `/player/profile/${file}`);
+        return;
+      }
+    }
+    if (onError) onError(e);
+  };
+  return (
+    <AvatarPrimitive.Image
+      ref={ref}
+      className={cn("aspect-square h-full w-full", className)}
+      crossOrigin={crossOrigin ?? "anonymous"}
+      referrerPolicy={referrerPolicy ?? "no-referrer"}
+      onError={handleError}
+      {...props}
+    />
+  );
+});
 AvatarImage.displayName = AvatarPrimitive.Image.displayName;
 
 const AvatarFallback = React.forwardRef<

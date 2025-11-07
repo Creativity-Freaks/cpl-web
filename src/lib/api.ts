@@ -145,14 +145,35 @@ export type HomeStats = { players: number; teams: number; matches: number; prize
 
 export const fetchHomeStats = async (): Promise<HomeStats> => {
   try {
-    const [teamsResp, playersResp, matchesResp] = await Promise.all([
-      fetch(buildUrl("/api/v1/admin/teams/count")),
-      fetch(buildUrl("/api/v1/admin/players/count")),
-      fetch(buildUrl("/api/v1/admin/matches/count")),
+    // Requirement: Teams count is static 5; Players count from /api/v1/adminall/players
+    // Keep matches count best-effort from existing endpoint, and fixed prize pool.
+    const [playersList, matchesResp] = await Promise.all([
+      // Use helper that handles auth headers and errors
+      (async () => {
+        try { return await getAdminAllPlayers(); } catch { return null as unknown; }
+      })(),
+      fetch(buildUrl("/api/v1/admin/matches/count")).catch(() => null as unknown as Response),
     ]);
-    const teams = teamsResp.ok ? Number(await teamsResp.json()) : 0;
-    const players = playersResp.ok ? Number(await playersResp.json()) : 0;
-    const matches = matchesResp.ok ? Number(await matchesResp.json()) : 0;
+    const extractCountFromUnknown = (val: unknown): number => {
+      if (Array.isArray(val)) return val.length;
+      if (val && typeof val === 'object') {
+        const obj = val as Record<string, unknown>;
+        // Common shape: { data: [...] }
+        if ('data' in obj) {
+          const data = (obj as { data?: unknown }).data;
+          if (Array.isArray(data)) return data.length;
+        }
+        // New provided shape: { total_players: number, all_player_list: [...] }
+        const maybeTotal = obj['total_players'];
+        if (typeof maybeTotal === 'number' && Number.isFinite(maybeTotal)) return maybeTotal;
+        const list = obj['all_player_list'] as unknown;
+        if (Array.isArray(list)) return list.length;
+      }
+      return 0;
+    };
+    const players = extractCountFromUnknown(playersList);
+    const matches = matchesResp && (matchesResp as Response).ok ? Number(await (matchesResp as Response).json()) : 0;
+    const teams = 5;
     const prizePool = 50000;
     return { teams, players, matches, prizePool };
   } catch (_) {
@@ -352,6 +373,9 @@ export const API_PATHS = {
   // Auth
   login: "/api/v1/token",
   registration: "/api/v1/registration",
+  // Password / Auth recovery
+  forgotPassword: "/api/v1/forgoten/password", // note: backend path uses 'forgoten'
+  passwordReset: "/api/v1/password/reset",
   // Player profile image
   uploadPlayerProfile: "/api/v1/upload/player/profile",
   getPlayerProfile: (filename: string) => `/api/v1/player/profile/${filename}`,
@@ -416,6 +440,23 @@ export function getAuthToken(): string | null {
   }
 }
 
+// Global logout handler for session expiry
+let globalLogoutHandler: (() => void) | null = null;
+export function setGlobalLogoutHandler(handler: () => void) {
+  globalLogoutHandler = handler;
+}
+
+// Clear auth tokens
+export function clearAuthTokens() {
+  try {
+    localStorage.removeItem(ACCESS_TOKEN_KEY_PRIMARY);
+    localStorage.removeItem(ACCESS_TOKEN_KEY_FALLBACK);
+    localStorage.removeItem("cpl_current_user");
+  } catch {
+    /* no-op */
+  }
+}
+
 async function apiFetchJson<T>(path: string, init?: JsonInit): Promise<T> {
   const { body, headers, ...rest } = init || {};
   const token = getAuthToken();
@@ -424,6 +465,26 @@ async function apiFetchJson<T>(path: string, init?: JsonInit): Promise<T> {
     body: body !== undefined ? JSON.stringify(body) : undefined,
     ...rest,
   });
+  
+  // Check for session expiry (401 Unauthorized or 403 Forbidden)
+  if (res.status === 401 || res.status === 403) {
+    // Clear tokens
+    clearAuthTokens();
+    // Trigger global logout handler if set
+    if (globalLogoutHandler) {
+      globalLogoutHandler();
+    }
+    // Also trigger logout via BroadcastChannel for cross-tab communication
+    try {
+      const bc = new BroadcastChannel('auth-updates');
+      bc.postMessage({ type: 'session-expired' });
+      bc.close();
+    } catch {
+      /* no-op */
+    }
+    throw new Error('Session expired. Please login again.');
+  }
+  
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
   // Handle 204 No Content
   if (res.status === 204) return undefined as unknown as T;
@@ -450,12 +511,62 @@ export async function registerUser(payload: Record<string, unknown>): Promise<un
   return apiFetchJson(API_PATHS.registration, { method: "POST", body: payload });
 }
 
+// Password recovery
+export async function requestPasswordReset(email: string): Promise<unknown> {
+  // Minimal payload commonly expected by backends
+  const body = { email } as const;
+  return apiFetchJson(API_PATHS.forgotPassword, { method: "POST", body });
+}
+
+export type ResetPasswordPayload = {
+  // If coming from email link
+  token?: string | null;
+  // For authenticated change (optional and best-effort)
+  current?: string | null;
+  // New password and confirmation
+  password: string;
+  confirm?: string | null;
+  // Some backends require email with token as well
+  email?: string | null;
+};
+export async function resetPassword(payload: ResetPasswordPayload): Promise<unknown> {
+  const body: Record<string, unknown> = {};
+  if (payload.email) body.email = payload.email;
+  if (payload.token) body.token = payload.token;
+  if (payload.current) body.current_password = payload.current;
+  // Provide a few common key variants to maximize compatibility
+  body.password = payload.password;
+  if (payload.confirm ?? payload.password) {
+    body.confirm_password = payload.confirm ?? payload.password;
+    body.password_confirmation = payload.confirm ?? payload.password;
+  }
+  // POST to the reset endpoint
+  return apiFetchJson(API_PATHS.passwordReset, { method: "POST", body });
+}
+
 // Player profile image
 export async function uploadPlayerProfileImage(file: File): Promise<unknown> {
   const fd = new FormData();
   fd.set("file", file);
   const token = getAuthToken();
   const res = await fetch(buildUrl(API_PATHS.uploadPlayerProfile), { method: "POST", headers: token ? { Authorization: `Bearer ${token}` } : undefined, body: fd });
+  
+  // Check for session expiry
+  if (res.status === 401 || res.status === 403) {
+    clearAuthTokens();
+    if (globalLogoutHandler) {
+      globalLogoutHandler();
+    }
+    try {
+      const bc = new BroadcastChannel('auth-updates');
+      bc.postMessage({ type: 'session-expired' });
+      bc.close();
+    } catch {
+      /* no-op */
+    }
+    throw new Error('Session expired. Please login again.');
+  }
+  
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
   return await res.json();
 }
@@ -486,9 +597,11 @@ export async function getPlayerProfiles(): Promise<PlayerProfile | PlayerProfile
 }
 
 export function extractFilename(pathLike: string): string {
-  // Handles values like "app/photo/player/abc.png" or just "abc.png"
-  const parts = String(pathLike).split("/");
-  return parts[parts.length - 1] || String(pathLike);
+  // Handles values like "app/photo/player/abc.png" or "app\\photo\\player\\abc.png" or encoded backslashes
+  const raw = decodeURIComponent(String(pathLike));
+  const normalized = raw.replace(/\\/g, "/");
+  const parts = normalized.split("/").filter(Boolean);
+  return parts.length ? parts[parts.length - 1] : normalized;
 }
 
 export function resolveProfileImageUrl(pathLike?: string | null): string | null {
@@ -498,12 +611,57 @@ export function resolveProfileImageUrl(pathLike?: string | null): string | null 
   return playerProfileImageUrl(filename);
 }
 
+// Generic image fetcher returning a blob Object URL (handles endpoints that expect Accept: application/json or need auth)
+export async function fetchImageAsObjectUrl(rawPathOrUrl: string): Promise<string | null> {
+  try {
+    if (!rawPathOrUrl) return null;
+    // Allow caller to pass either full URL or just a path/filename
+    const isFull = /^https?:\/\//i.test(rawPathOrUrl);
+    let url = rawPathOrUrl;
+    if (!isFull) {
+      const filename = extractFilename(rawPathOrUrl);
+      url = buildUrl(`/api/v1/player/profile/${filename}`);
+    } else if (/\/player\/profile\//.test(rawPathOrUrl)) {
+      // If the full URL mistakenly includes directories under profile, strip to filename
+      const file = extractFilename(rawPathOrUrl);
+      url = buildUrl(`/api/v1/player/profile/${file}`);
+    }
+    const token = getAuthToken();
+    const headers: Record<string, string> = { accept: 'application/json' };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const res = await fetch(url, { method: 'GET', headers });
+    if (!res.ok) return null;
+    // Try to detect content-type; if json returned containing an URL field, follow it
+    const ct = res.headers.get('content-type') || '';
+    if (ct.includes('application/json')) {
+      try {
+        const json = await res.json();
+        const maybeUrl = json?.url || json?.image || json?.photo_url || json?.path;
+        if (maybeUrl && typeof maybeUrl === 'string' && /^https?:\/\//i.test(maybeUrl)) {
+          const proxied = await fetch(maybeUrl);
+          if (proxied.ok) {
+            const blob = await proxied.blob();
+            return URL.createObjectURL(blob);
+          }
+        }
+        return null;
+      } catch { return null; }
+    }
+    const blob = await res.blob();
+    return URL.createObjectURL(blob);
+  } catch {
+    return null;
+  }
+}
+
 export async function fetchCurrentPlayerProfile(): Promise<(PlayerProfile & { avatarUrl: string | null }) | null> {
   const raw = await getPlayerProfiles();
   if (!raw) return null;
   const one = Array.isArray(raw) ? (raw[0] as PlayerProfile | undefined) : (raw as PlayerProfile);
   if (!one) return null;
-  return { ...one, avatarUrl: resolveProfileImageUrl(one.photo_url ?? null) };
+  // Some backends return photo_url with nested directories; strip to filename
+  const avatarUrl = resolveProfileImageUrl(one.photo_url ? extractFilename(one.photo_url) : null);
+  return { ...one, avatarUrl };
 }
 
 // Player statistics
@@ -607,7 +765,7 @@ export async function listTournamentImageFiles(tournamentId?: string): Promise<u
   return apiFetchJson(path);
 }
 export function tournamentImageUrl(filename: string): string {
-  const safe = encodeURIComponent(filename);
+  const safe = encodeURIComponent(extractFilename(filename));
   return buildUrl(API_PATHS.getTournamentImage(safe));
 }
 
@@ -626,6 +784,17 @@ export async function fetchTournamentImages(tournamentId?: string): Promise<Tour
       } catch {
         raw = [];
       }
+    }
+    // Probe corrected spelling endpoint if empty
+    if (Array.isArray(raw) && raw.length === 0) {
+      try {
+        const correctedBase = buildUrl('/api/v1/tournament/image/files');
+        const altUrl = tournamentId ? `${correctedBase}?tournament_id=${encodeURIComponent(tournamentId)}` : correctedBase;
+        const probe = await fetch(altUrl);
+        if (probe.ok) {
+          try { raw = await probe.json(); } catch { /* ignore parse */ }
+        }
+      } catch { /* noop */ }
     }
   type RawItem = { filename?: string; name?: string; file?: string; photo_url?: string; id?: string | number; tournament_id?: string | number; tournamentId?: string | number; tournament?: string | number; year?: string | number } | string;
     // Accept a variety of server payload shapes
@@ -648,7 +817,8 @@ export async function fetchTournamentImages(tournamentId?: string): Promise<Tour
         const fileFromObj = obj?.filename ?? obj?.name ?? obj?.file;
         const filenameRaw = String(fileFromObj ?? (typeof it === 'string' ? it : '') ?? "");
         const fromPhotoUrl = obj?.photo_url ? extractFilename(String(obj.photo_url)) : undefined;
-        const filename = String(fromPhotoUrl ?? filenameRaw);
+        const filenameBase = String(fromPhotoUrl ?? filenameRaw);
+        const filename = extractFilename(filenameBase);
         const tidRaw = obj?.tournament_id ?? obj?.tournamentId ?? obj?.tournament;
         const tid = tidRaw !== undefined && tidRaw !== null && String(tidRaw) !== "" ? String(tidRaw) : undefined;
         const yr = obj?.year !== undefined ? String(obj.year) : undefined;
@@ -658,14 +828,16 @@ export async function fetchTournamentImages(tournamentId?: string): Promise<Tour
         return { filename, url, id, tournament_id: tid, year: yr } as TournamentImageFile;
       })
       .filter((x) => x.filename);
-    if (!tournamentId) return norm;
+    // Deduplicate
+    const map = new Map<string, TournamentImageFile>();
+    for (const n of norm) if (!map.has(n.filename)) map.set(n.filename, n);
+    const deduped = Array.from(map.values());
+    if (!tournamentId) return deduped;
     const key = String(tournamentId);
-    // Filter by explicit t.tournament_id if present; otherwise try loose match by filename containing id or year
-    const byId = norm.filter((x) => x.tournament_id && String(x.tournament_id) === key);
+    const byId = deduped.filter((x) => x.tournament_id && String(x.tournament_id) === key);
     if (byId.length > 0) return byId;
-    const loose = norm.filter((x) => x.filename.includes(key) || (x.year && x.year === key));
-    // If no match at all, return everything so users at least see uploads
-    return loose.length > 0 ? loose : norm;
+    const loose = deduped.filter((x) => x.filename.includes(key) || (x.year && x.year === key));
+    return loose.length > 0 ? loose : deduped;
   } catch {
     return [];
   }

@@ -5,9 +5,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
-import { Link } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
+import { requestPasswordReset } from "@/lib/api";
 
 const ForgotPassword = () => {
+  const navigate = useNavigate();
   const onSubmit: React.FormEventHandler<HTMLFormElement> = async (e) => {
     e.preventDefault();
     const form = new FormData(e.currentTarget);
@@ -16,8 +18,15 @@ const ForgotPassword = () => {
       toast.error("Please enter your email");
       return;
     }
-    // Backend does not expose a password reset endpoint yet.
-    toast.info("Password reset via email isn't available yet. Please contact an admin or try again later.");
+    try {
+      await requestPasswordReset(email);
+      toast.success("If that email exists, a reset link has been sent.");
+      // Optionally redirect to login
+      setTimeout(() => navigate("/login"), 500);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to request reset";
+      toast.error(msg);
+    }
   };
 
   return (

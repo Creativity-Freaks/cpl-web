@@ -15,7 +15,7 @@ import faviconUrl from "@/assets/cpl2026logo.png";
 			document.head.appendChild(link);
 		}
 		link.href = faviconUrl;
-		link.type = "image/jpeg";
+	link.type = "image/png";
 	}
 })();
 

@@ -12,6 +12,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Gavel, Play, Pause, StopCircle, UserPlus, DollarSign, Clock, Hammer, Users, Trophy, LogOut, Settings, Search, Mic2, Zap, Crown, Target, IndianRupee, Sparkles, Award, TrendingUp, Star, Activity } from "lucide-react";
 import { toast } from "sonner";
+import { buildUrl } from '../config/api';
 
 // Import logo and player images from src/assets
 import cplLogo from "@/assets/cpl2026logo.png";
@@ -270,7 +271,19 @@ const AdminAuction = () => {
         src={imageErrors.has(player.id) ? getFallbackImage(player.id) : player.image}
         alt={player.name}
         className={`${sizes[size]} rounded-2xl object-cover border-4 border-white shadow-lg ${className}`}
-        onError={() => handleImageError(player.id, getFallbackImage(player.id))}
+        crossOrigin="anonymous"
+        referrerPolicy="no-referrer"
+        onError={async (e) => {
+          // First try to fetch with auth/accept headers and use blob URL
+          try {
+            const el = e.currentTarget as HTMLImageElement;
+            const { fetchImageAsObjectUrl } = await import('@/lib/api');
+            const blobUrl = await fetchImageAsObjectUrl(el.src);
+            if (blobUrl) { el.src = blobUrl; return; }
+          } catch {/* fallthrough */}
+          // If that fails, fall back to predefined local image
+          handleImageError(player.id, getFallbackImage(player.id));
+        }}
       />
     );
   };
@@ -287,6 +300,8 @@ const AdminAuction = () => {
                   src={cplLogo} 
                   alt="CPL 2026 Logo" 
                   className="h-12 w-12 object-contain"
+                  crossOrigin="anonymous"
+                  referrerPolicy="no-referrer"
                   onError={(e) => {
                     const target = e.target as HTMLImageElement;
                     target.style.display = 'none';

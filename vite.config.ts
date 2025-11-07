@@ -9,6 +9,7 @@ export default defineConfig(({ mode }) => ({
     port: 8080,
   },
   plugins: [react()],
+
   build: {
     rollupOptions: {
       output: {
@@ -20,9 +21,12 @@ export default defineConfig(({ mode }) => ({
       }
     }
   },
+
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
     },
+    // Prevent multiple copies of React from being bundled (helps avoid context/hook issues)
+    dedupe: ["react", "react-dom"],
   },
 }));

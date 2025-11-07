@@ -8,6 +8,8 @@ import { useForm } from "react-hook-form";
 import * as z from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
+import { useSearchParams, useNavigate } from "react-router-dom";
+import { resetPassword } from "@/lib/api";
 
 const schema = z.object({
   current: z.string().optional(),
@@ -18,11 +20,27 @@ const schema = z.object({
 type FormValues = z.infer<typeof schema>;
 
 const ChangePassword = () => {
+  const [params] = useSearchParams();
+  const navigate = useNavigate();
   const form = useForm<FormValues>({ resolver: zodResolver(schema) });
 
   const onSubmit = form.handleSubmit(async (values) => {
-    // Change password flow is not available via the public API yet.
-    toast.info("Password change isn't available yet. Please contact an admin.");
+    try {
+      const token = params.get("token") || params.get("reset_token") || null;
+      await resetPassword({
+        token,
+        current: values.current || null,
+        password: values.password,
+        confirm: values.confirm,
+      });
+      toast.success("Password updated successfully");
+      // If coming from a reset link, redirect to login
+      if (token) setTimeout(() => navigate("/login"), 500);
+      form.reset({ current: "", password: "", confirm: "" });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to update password";
+      toast.error(msg);
+    }
   });
 
   return (
@@ -65,3 +83,5 @@ const ChangePassword = () => {
 };
 
 export default ChangePassword;
+  
+
