@@ -9,8 +9,19 @@ export default defineConfig(({ mode }) => ({
     port: 8080,
   },
   plugins: [react()],
-  // Use Vite defaults for chunking to avoid potential execution order issues on some hosts
-  build: {},
+
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('node_modules')) {
+            return id.toString().split('node_modules/')[1].split('/')[0].toString();
+          }
+        }
+      }
+    }
+  },
+
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),

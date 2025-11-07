@@ -30,6 +30,7 @@ DialogOverlay.displayName = DialogPrimitive.Overlay.displayName;
 const DialogContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content>
+
 >(({ className, children, "aria-describedby": ariaDescribedBy, ...props }, ref) => {
   // Provide a visually hidden fallback title if consumer forgets DialogTitle
   const [hasTitle, setHasTitle] = React.useState(false);
