@@ -25,8 +25,8 @@ export default defineConfig(({ mode }) => ({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
-      react: path.resolve("./node_modules/react"), // ✅ fix duplication
-      "react-dom": path.resolve("./node_modules/react-dom"), // ✅ fix duplication
     },
+    // Prevent multiple copies of React from being bundled (helps avoid context/hook issues)
+    dedupe: ["react", "react-dom"],
   },
 }));
