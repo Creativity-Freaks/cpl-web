@@ -9,19 +9,8 @@ export default defineConfig(({ mode }) => ({
     port: 8080,
   },
   plugins: [react()],
-  build: {
-    rollupOptions: {
-      output: {
-        manualChunks(id) {
-          if (id.includes("node_modules")) {
-            if (id.includes("react") || id.includes("react-dom"))
-              return "react-vendor";
-            return "vendor";
-          }
-        },
-      },
-    },
-  },
+  // Use Vite defaults for chunking to avoid potential execution order issues on some hosts
+  build: {},
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
