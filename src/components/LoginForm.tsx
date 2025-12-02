@@ -28,7 +28,8 @@ const LoginForm: React.FC<{ compact?: boolean; onSuccess?: () => void }> = ({ co
       toast.success("Logged in successfully");
       onSuccess?.();
     } catch (err) {
-      toast.error("Login failed");
+      const msg = err instanceof Error ? err.message : 'Login failed';
+      toast.error(msg);
     }
   });
 

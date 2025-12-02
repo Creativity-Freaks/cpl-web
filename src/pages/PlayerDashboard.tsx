@@ -85,13 +85,16 @@ const PlayerDashboard = () => {
                     crossOrigin="anonymous"
                     referrerPolicy="no-referrer"
                     onError={async (e) => {
+                      const el = e.currentTarget as HTMLImageElement | null;
+                      if (!el || !el.isConnected) return;
                       try {
-                        const el = e.currentTarget as HTMLImageElement;
                         const { fetchImageAsObjectUrl } = await import("@/lib/api");
                         const url = await fetchImageAsObjectUrl(el.src);
-                        if (url) { el.src = url; return; }
-                      } catch {/* ignore */}
-                      e.currentTarget.style.display = 'none';
+                        if (url && el.isConnected) { el.src = url; return; }
+                      } catch { /* ignore */ }
+                      if (el && el.isConnected) {
+                        el.style.display = 'none';
+                      }
                     }}
                   />
                 ) : (

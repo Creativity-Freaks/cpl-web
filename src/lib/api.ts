@@ -503,12 +503,63 @@ export async function login(username: string, password: string): Promise<LoginRe
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: form.toString(),
   });
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  if (!res.ok) {
+    // Try to read server-provided error message
+    let serverMsg = "";
+    try {
+      const ct = res.headers.get('content-type') || '';
+      if (ct.includes('application/json')) {
+        const j = await res.json().catch(() => null as unknown);
+        if (j && typeof j === 'object') {
+          const o = j as Record<string, unknown>;
+          serverMsg = String(o.detail ?? o.message ?? o.error ?? "");
+        }
+      } else {
+        serverMsg = await res.text();
+      }
+    } catch { /* ignore parse errors */ }
+    // Friendly defaults for common statuses
+    if (res.status === 401 || res.status === 400) {
+      throw new Error(serverMsg || 'Invalid email or password');
+    }
+    throw new Error(serverMsg || `${res.status} ${res.statusText}`);
+  }
   return (await res.json()) as LoginResponse;
 }
 
 export async function registerUser(payload: Record<string, unknown>): Promise<unknown> {
-  return apiFetchJson(API_PATHS.registration, { method: "POST", body: payload });
+  // Custom handler to surface clearer error messages (e.g., email already exists)
+  const res = await fetch(buildUrl(API_PATHS.registration), {
+    method: "POST",
+    headers: { "Content-Type": "application/json", accept: "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    let serverMsg = "";
+    try {
+      const ct = res.headers.get('content-type') || '';
+      if (ct.includes('application/json')) {
+        const j = await res.json().catch(() => null as unknown);
+        if (j && typeof j === 'object') {
+          const o = j as Record<string, unknown>;
+          serverMsg = String(o.detail ?? o.message ?? o.error ?? "");
+        }
+      } else {
+        serverMsg = await res.text();
+      }
+    } catch { /* ignore parse errors */ }
+    // Normalize duplicate email messages
+    const normalized = (() => {
+      const msg = (serverMsg || '').toLowerCase();
+      if (msg.includes('exist') || msg.includes('already')) return 'Email already exists';
+      return serverMsg;
+    })();
+    if (res.status === 409 || res.status === 400) {
+      throw new Error(normalized || 'Email already exists');
+    }
+    throw new Error(normalized || `${res.status} ${res.statusText}`);
+  }
+  try { return await res.json(); } catch { return null; }
 }
 
 // Password recovery
@@ -627,17 +678,30 @@ export async function fetchImageAsObjectUrl(rawPathOrUrl: string): Promise<strin
       url = buildUrl(`/api/v1/player/profile/${file}`);
     }
     const token = getAuthToken();
-    const headers: Record<string, string> = { accept: 'application/json' };
-    if (token) headers['Authorization'] = `Bearer ${token}`;
-    const res = await fetch(url, { method: 'GET', headers });
-    if (!res.ok) return null;
+    const headersPrimary: Record<string, string> = { accept: 'application/json' };
+    if (token) headersPrimary['Authorization'] = `Bearer ${token}`;
+    let res = await fetch(url, { method: 'GET', headers: headersPrimary });
+    if (!res.ok) {
+      // Retry strategy: if server error or auth-sensitive, retry without auth and with image accept
+      const headersRetry: Record<string, string> = { accept: 'image/*' };
+      res = await fetch(url, { method: 'GET', headers: headersRetry }).catch(() => res);
+      if (!res.ok) {
+        // Final fallback: octet-stream accept
+        const headersFinal: Record<string, string> = { accept: 'application/octet-stream' };
+        res = await fetch(url, { method: 'GET', headers: headersFinal }).catch(() => res);
+      }
+      if (!res.ok) return null;
+    }
     // Try to detect content-type; if json returned containing an URL field, follow it
     const ct = res.headers.get('content-type') || '';
     if (ct.includes('application/json')) {
       try {
         const json = await res.json();
-        const maybeUrl = json?.url || json?.image || json?.photo_url || json?.path;
-        if (maybeUrl && typeof maybeUrl === 'string' && /^https?:\/\//i.test(maybeUrl)) {
+        const maybeUrl = (json as Record<string, unknown>)?.url
+          || (json as Record<string, unknown>)?.image
+          || (json as Record<string, unknown>)?.photo_url
+          || (json as Record<string, unknown>)?.path;
+        if (maybeUrl && typeof maybeUrl === 'string') {
           const proxied = await fetch(maybeUrl);
           if (proxied.ok) {
             const blob = await proxied.blob();
@@ -648,6 +712,8 @@ export async function fetchImageAsObjectUrl(rawPathOrUrl: string): Promise<strin
       } catch { return null; }
     }
     const blob = await res.blob();
+    // Basic sanity check: non-empty blob
+    if (!blob || (blob.size !== undefined && blob.size === 0)) return null;
     return URL.createObjectURL(blob);
   } catch {
     return null;

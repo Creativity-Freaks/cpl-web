@@ -59,6 +59,8 @@ const RegisterForm: React.FC<Props> = ({ compact = false, onSuccess }) => {
       console.error(err);
       let msg = 'Registration failed';
       if (err instanceof Error) msg = err.message;
+      // Normalize duplicate email
+      if (/exist|already/i.test(msg)) msg = 'Email already exists';
       toast.error(msg);
     }
   });
