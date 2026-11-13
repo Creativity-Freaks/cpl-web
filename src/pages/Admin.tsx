@@ -156,6 +156,17 @@ const Admin: React.FC = () => {
   const [displayedConfirmedPlayers, setDisplayedConfirmedPlayers] = useState<any[]>([]);
   const [loadingAuctionPlayers, setLoadingAuctionPlayers] = useState(false);
   const [selectingPlayers, setSelectingPlayers] = useState(false);
+  const [loadingPlayerIds, setLoadingPlayerIds] = useState<Set<string | number>>(new Set());
+  const [removingPlayerIds, setRemovingPlayerIds] = useState<Set<string | number>>(new Set());
+  const [creatingTeam, setCreatingTeam] = useState(false);
+  const [creatingMatch, setCreatingMatch] = useState(false);
+  const [creatingTournament, setCreatingTournament] = useState(false);
+  const [updatingMatchId, setUpdatingMatchId] = useState<number | null>(null);
+  const [updatingTournamentId, setUpdatingTournamentId] = useState<number | null>(null);
+  const [addingCoinTeamId, setAddingCoinTeamId] = useState<number | null>(null);
+  const [playerSearchQuery, setPlayerSearchQuery] = useState<string>('');
+   const [confirmedPlayersSearchQuery, setConfirmedPlayersSearchQuery] = useState<string>('');
+   const [updatedPlayersSearchQuery, setUpdatedPlayersSearchQuery] = useState<string>('');
   const visibleCount = 5; // 5 players at a time
   const visibleCountConfirmed = 5;
   const [teamCoinInputMap, setTeamCoinInputMap] = useState<Record<string, number>>({});
@@ -405,12 +416,33 @@ const Admin: React.FC = () => {
   }, [confirmedAuctionPlayers.length, displayedConfirmedPlayers.length, visibleCountConfirmed]);
   // --- TOGGLE PLAYER SELECTION (Only highlights, for pending) ---
   const togglePlayerSelection = useCallback((player: any) => {
-    setPendingSelectedPlayers(prev =>
-      prev.some(p => p.id === player.id)
-        ? prev.filter(p => p.id !== player.id)
-        : [...prev, player]
-    );
+    setLoadingPlayerIds(prev => new Set(prev).add(String(player.id)));
+    setTimeout(() => {
+      setPendingSelectedPlayers(prev =>
+        prev.some(p => p.id === player.id)
+          ? prev.filter(p => p.id !== player.id)
+          : [...prev, player]
+      );
+      setLoadingPlayerIds(prev => {
+        const next = new Set(prev);
+        next.delete(String(player.id));
+        return next;
+      });
+    }, 100);
   }, []);
+
+  // --- FILTER PLAYERS BY SEARCH QUERY ---
+  const getSearchFilteredPlayers = useCallback(() => {
+    if (!playerSearchQuery.trim()) {
+      return displayedPlayers;
+    }
+    const query = playerSearchQuery.toLowerCase();
+    return displayedPlayers.filter(player => 
+      (player.name && player.name.toLowerCase().includes(query)) ||
+      (player.email && player.email.toLowerCase().includes(query)) ||
+      (player.category && player.category.toLowerCase().includes(query))
+    );
+  }, [displayedPlayers, playerSearchQuery]);
   // --- SELECT PLAYERS FOR AUCTION ---
   const handleSelectPlayersForAuction = useCallback(async () => {
     if (!auctionTournamentId || auctionTournamentId === 0) {
@@ -483,6 +515,7 @@ const Admin: React.FC = () => {
       return;
     }
    
+    setRemovingPlayerIds(prev => new Set(prev).add(auctionPlayerId));
     try {
       await api.delete(`/api/v1/admin/auction/remove-player/${auctionPlayerId}`);
       toast.success("Player removed from auction");
@@ -497,6 +530,12 @@ const Admin: React.FC = () => {
       try { bcRef.current?.postMessage({ type: 'refresh', section: 'auction-players' }); } catch {}
     } catch (error: any) {
       toast.error("Remove failed: " + error.message);
+    } finally {
+      setRemovingPlayerIds(prev => {
+        const next = new Set(prev);
+        next.delete(auctionPlayerId);
+        return next;
+      });
     }
   }, [loadAuctionData, fetchLivePlayers]);
   // --- CREATE TEAM ---
@@ -506,6 +545,7 @@ const Admin: React.FC = () => {
       return;
     }
    
+    setCreatingTeam(true);
     try {
       await api.post("/api/v1/admin/teams", {
         tournament_id: createTeamTournamentId,
@@ -520,6 +560,8 @@ const Admin: React.FC = () => {
       try { bcRef.current?.postMessage({ type: 'refresh', section: 'team' }); } catch {}
     } catch (error: any) {
       toast.error("Team create failed: " + error.message);
+    } finally {
+      setCreatingTeam(false);
     }
   }, [createTeamTournamentId, newTeam, selectedTournamentId, fetchTeams]);
   // --- CREATE MATCH ---
@@ -534,6 +576,7 @@ const Admin: React.FC = () => {
       return;
     }
    
+    setCreatingMatch(true);
     try {
       await api.post("/api/v1/admin/matches", {
         tournament_id: selectedMatchTournamentId,
@@ -550,12 +593,15 @@ const Admin: React.FC = () => {
       try { bcRef.current?.postMessage({ type: 'refresh', section: 'match' }); } catch {}
     } catch (error: any) {
       toast.error("Match create failed: " + error.message);
+    } finally {
+      setCreatingMatch(false);
     }
   }, [selectedMatchTournamentId, newMatch, fetchMatches]);
   // --- UPDATE MATCH STATUS ---
   const updateMatchStatus = useCallback(async (id: number, status: string) => {
     const previous = matches.find(m => m.id === id);
     setMatches(p => p.map(m => m.id === id ? { ...m, status } : m));
+    setUpdatingMatchId(id);
     try {
       await api.put(`/api/v1/admin/matches/${id}/status?new_status=${status}`, {});
       toast.success("Match status updated to " + status);
@@ -563,6 +609,8 @@ const Admin: React.FC = () => {
       toast.error("Update failed: " + error.message);
       setMatches(p => p.map(m => m.id === id ? previous! : m));
       if (selectedMatchTournamentId) fetchMatches(selectedMatchTournamentId);
+    } finally {
+      setUpdatingMatchId(null);
     }
   }, [matches, selectedMatchTournamentId, fetchMatches]);
   // --- CREATE TOURNAMENT ---
@@ -579,6 +627,7 @@ const Admin: React.FC = () => {
       end_date: newTournament.endDate!.toISOString().split('T')[0]
     };
    
+    setCreatingTournament(true);
     try {
       await api.post("/api/v1/admin/tournaments/create", payload);
       setNewTournament({ name: '', year: '', startDate: null, endDate: null });
@@ -589,12 +638,15 @@ const Admin: React.FC = () => {
       try { bcRef.current?.postMessage({ type: 'refresh', section: 'tournaments' }); } catch {}
     } catch (error: any) {
       toast.error("Create error: " + error.message);
+    } finally {
+      setCreatingTournament(false);
     }
   }, [newTournament, fetchTournaments]);
   // --- UPDATE TOURNAMENT STATUS ---
   const updateStatus = useCallback(async (id: number, status: string) => {
     const previous = tournaments.find(t => t.id === id);
     setTournaments(p => p.map(t => t.id === id ? { ...t, status } : t));
+    setUpdatingTournamentId(id);
     try {
       await api.put(`/api/v1/admin/tournaments/${id}/status?new_status=${status}`, {});
       toast.success("Status updated to " + status);
@@ -602,6 +654,8 @@ const Admin: React.FC = () => {
       toast.error("Update failed: " + error.message);
       setTournaments(p => p.map(t => t.id === id ? previous! : t));
       fetchTournaments();
+    } finally {
+      setUpdatingTournamentId(null);
     }
   }, [tournaments, fetchTournaments]);
   // --- EFFECTS ---
@@ -1285,8 +1339,11 @@ const getSectionedPlayers = useCallback((categoryLabel: string) => {
                     </div>
                   </div>
                   <div className="flex gap-3 mt-6">
-                    <Button onClick={handleCreateTournament} className="flex-1">Create</Button>
-                    <Button variant="outline" className="flex-1" onClick={() => setNewTournament({ name: '', year: '', startDate: null, endDate: null })}>Cancel</Button>
+                    <Button onClick={handleCreateTournament} className="flex-1 relative" disabled={creatingTournament}>
+                      {creatingTournament && <span className="absolute left-4 w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />}
+                      <span className={creatingTournament ? 'pl-6' : ''}>{creatingTournament ? 'Creating...' : 'Create'}</span>
+                    </Button>
+                    <Button variant="outline" className="flex-1" onClick={() => setNewTournament({ name: '', year: '', startDate: null, endDate: null })} disabled={creatingTournament}>Cancel</Button>
                   </div>
                 </CardContent>
               </Card>
@@ -1300,11 +1357,21 @@ const getSectionedPlayers = useCallback((categoryLabel: string) => {
                         <p className="text-sm text-gray-600">{t.year} | {t.start_date} to {t.end_date}</p>
                         <p className="text-xs text-blue-600">Status: {t.status}</p>
                       </div>
-                      <Select value={t.status} onChange={e => updateStatus(t.id, e.target.value)}>
-                        <option value="upcoming">Upcoming</option>
-                        <option value="active">Active</option>
-                        <option value="completed">Completed</option>
-                      </Select>
+                      <div className="relative">
+                        <Select 
+                          value={t.status} 
+                          onChange={e => updateStatus(t.id, e.target.value)}
+                          disabled={updatingTournamentId === t.id}
+                          className={updatingTournamentId === t.id ? 'opacity-60 cursor-wait' : ''}
+                        >
+                          <option value="upcoming">Upcoming</option>
+                          <option value="active">Active</option>
+                          <option value="completed">Completed</option>
+                        </Select>
+                        {updatingTournamentId === t.id && (
+                          <span className="absolute right-3 top-1/2 transform -translate-y-1/2 w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+                        )}
+                      </div>
                     </Card>
                   ))}
                 </div>
@@ -1331,7 +1398,10 @@ const getSectionedPlayers = useCallback((categoryLabel: string) => {
                     </div>
                     <div><Label>Team Name</Label><Input value={newTeam.name} onChange={e => setNewTeam(s => ({...s, name: e.target.value}))} placeholder="e.g. BitLockers" /></div>
                     <div><Label>Team Code</Label><Input value={newTeam.code} onChange={e => setNewTeam(s => ({...s, code: e.target.value}))} placeholder="e.g. CCE" /></div>
-                    <Button onClick={handleCreateTeam} className="w-full">Create Team</Button>
+                    <Button onClick={handleCreateTeam} className="w-full relative" disabled={creatingTeam}>
+                      {creatingTeam && <span className="absolute left-4 w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />}
+                      <span className={creatingTeam ? 'pl-6' : ''}>{creatingTeam ? 'Creating...' : 'Create Team'}</span>
+                    </Button>
                   </div>
                 </CardContent>
               </Card>
@@ -1385,32 +1455,47 @@ const getSectionedPlayers = useCallback((categoryLabel: string) => {
               <Card className="mb-6">
                 <CardContent>
                   <Label>Players (multi-select):</Label>
+                  <div className="mb-3">
+                    <Input
+                      type="text"
+                      placeholder="🔍 Search players by name, email, or category..."
+                      value={playerSearchQuery}
+                      onChange={(e) => setPlayerSearchQuery(e.target.value)}
+                      className="w-full p-3 border border-blue-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    />
+                  </div>
                   <div
                     className="max-h-80 overflow-y-auto border border-gray-300 rounded-lg p-3 bg-gray-50"
                     onScroll={handleScroll}
                   >
                     {loadingAuctionPlayers ? (
                       <p className="text-center py-4">Loading players...</p>
-                    ) : displayedPlayers.length === 0 ? (
-                      <p className="text-center py-4 text-gray-500">No players available</p>
+                    ) : getSearchFilteredPlayers().length === 0 ? (
+                      <p className="text-center py-4 text-gray-500">
+                        {playerSearchQuery.trim() ? 'No players match your search' : 'No players available'}
+                      </p>
                     ) : (
                       <div className="space-y-2">
-                        {displayedPlayers.map(player => (
+                        {getSearchFilteredPlayers().map(player => (
                           <div
                             key={player.id}
-                            onClick={() => togglePlayerSelection(player)}
+                            onClick={() => !loadingPlayerIds.has(String(player.id)) && togglePlayerSelection(player)}
                             className={`flex items-center p-3 rounded-lg cursor-pointer transition ${
                               pendingSelectedPlayers.some(p => p.id === player.id)
                                 ? 'bg-blue-100 border-2 border-blue-500'
                                 : 'bg-white border-2 border-transparent hover:bg-gray-100'
-                            }`}
+                            } ${loadingPlayerIds.has(String(player.id)) ? 'opacity-60' : ''}`}
                           >
-                            <input
-                              type="checkbox"
-                              checked={pendingSelectedPlayers.some(p => p.id === player.id)}
-                              onChange={() => {}}
-                              className="mr-3 pointer-events-none"
-                            />
+                            {loadingPlayerIds.has(String(player.id)) ? (
+                              <div className="mr-3 w-5 h-5 rounded border-2 border-blue-500 border-t-blue-300 animate-spin" />
+                            ) : (
+                              <input
+                                type="checkbox"
+                                checked={pendingSelectedPlayers.some(p => p.id === player.id)}
+                                onChange={() => {}}
+                                className="mr-3 pointer-events-none"
+                              />
+                            )}
                             <div className="flex-1">
                               <p className="font-medium">{player.name}</p>
                               <p className="text-sm text-gray-600">{player.email} • {player.category}</p>
@@ -1433,10 +1518,13 @@ const getSectionedPlayers = useCallback((categoryLabel: string) => {
                   </div>
                   <Button
                     onClick={handleSelectPlayersForAuction}
-                    className="w-full mt-4"
+                    className="w-full mt-4 relative"
                     disabled={pendingSelectedPlayers.length === 0 || !auctionTournamentId || selectingPlayers}
                   >
-                    {selectingPlayers ? 'Selecting...' : `Select Players for Auction (${pendingSelectedPlayers.length})`}
+                    {selectingPlayers && <span className="absolute left-4 w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />}
+                    <span className={selectingPlayers ? 'pl-6' : ''}>
+                      {selectingPlayers ? 'Adding Players...' : `Select Players for Auction (${pendingSelectedPlayers.length})`}
+                    </span>
                   </Button>
                 </CardContent>
               </Card>
@@ -1447,8 +1535,24 @@ const getSectionedPlayers = useCallback((categoryLabel: string) => {
                     <h3 className="text-lg font-bold mb-4 text-green-700">
                       Selected Players for Auction ({confirmedAuctionPlayers.length})
                     </h3>
+                     <div className="mb-4">
+                       <Input
+                         type="text"
+                         placeholder="Search by player name (case-insensitive)..."
+                         value={confirmedPlayersSearchQuery}
+                         onChange={(e) => setConfirmedPlayersSearchQuery(e.target.value)}
+                         className="w-full"
+                       />
+                     </div>
                     <div className="space-y-3">
-                      {confirmedAuctionPlayers.map(player => (
+                       {confirmedAuctionPlayers
+                         .filter((player: any) => 
+                           !confirmedPlayersSearchQuery || 
+                           (player.name || player.player_name || '')
+                             .toLowerCase()
+                             .includes(confirmedPlayersSearchQuery.toLowerCase())
+                         )
+                         .map(player => (
                         <div
                           key={player.auction_player_id || player.id}
                           className="flex justify-between items-center p-4 bg-green-50 rounded-lg border border-green-200"
@@ -1472,12 +1576,22 @@ const getSectionedPlayers = useCallback((categoryLabel: string) => {
                           <Button
                             variant="outline"
                             size="sm"
-                            className="text-red-600 border-red-300 hover:bg-red-50"
+                            className={`text-red-600 border-red-300 hover:bg-red-50 relative ${
+                              removingPlayerIds.has(player.auction_player_id || player.id) ? 'opacity-60 cursor-wait' : ''
+                            }`}
+                            disabled={removingPlayerIds.has(player.auction_player_id || player.id)}
                             onClick={(e) => {
                               handleRemovePlayer(player.auction_player_id || player.id);
                             }}
                           >
-                            Remove
+                            {removingPlayerIds.has(player.auction_player_id || player.id) ? (
+                              <span className="flex items-center gap-2">
+                                <span className="w-3 h-3 border-2 border-red-600 border-t-transparent rounded-full animate-spin" />
+                                Removing...
+                              </span>
+                            ) : (
+                              'Remove'
+                            )}
                           </Button>
                         </div>
                       ))}
@@ -1574,11 +1688,15 @@ const getSectionedPlayers = useCallback((categoryLabel: string) => {
                                     <Button
                                       variant="outline"
                                       size="sm"
-                                      className="border-indigo-200 text-indigo-700 hover:bg-indigo-50"
+                                      className={`border-indigo-200 text-indigo-700 hover:bg-indigo-50 relative ${
+                                        addingCoinTeamId === team.id ? 'opacity-60 cursor-wait' : ''
+                                      }`}
+                                      disabled={addingCoinTeamId === team.id}
                                       onClick={async ()=>{
                                         const add = Number(teamCoinInputMap[String(team.id)] ?? 0) || 0;
                                         if (!auctionTournamentId) { toast.error('Select a tournament first'); return; }
                                         if (add === 0) { toast.error('Enter coin amount'); return; }
+                                        setAddingCoinTeamId(team.id);
                                         try {
                                           // Call backend: POST /api/v1/admin/update/team/coin/{tournament_id}/{team_id}?new_coin={add}
                                           await api.post(`/api/v1/admin/update/team/coin/${auctionTournamentId}/${team.id}?new_coin=${encodeURIComponent(String(add))}`, {});
@@ -1607,10 +1725,19 @@ const getSectionedPlayers = useCallback((categoryLabel: string) => {
                                           } catch {}
                                         } catch (e:any) {
                                           toast.error('Add coin failed: ' + (e?.message || 'Unknown error'));
+                                        } finally {
+                                          setAddingCoinTeamId(null);
                                         }
                                       }}
                                     >
-                                      Add Coin
+                                      {addingCoinTeamId === team.id ? (
+                                        <span className="flex items-center gap-1">
+                                          <span className="w-3 h-3 border-2 border-indigo-700 border-t-transparent rounded-full animate-spin" />
+                                          Adding...
+                                        </span>
+                                      ) : (
+                                        'Add Coin'
+                                      )}
                                     </Button>
                                   </div>
                                 </div>
@@ -2213,13 +2340,20 @@ const getSectionedPlayers = useCallback((categoryLabel: string) => {
                                 <Button
                                   variant="outline"
                                   size="sm"
-                                  className="text-red-600 border-red-300 hover:bg-red-50 flex-shrink-0"
+                                  className={`text-red-600 border-red-300 hover:bg-red-50 flex-shrink-0 relative ${
+                                    removingPlayerIds.has(player.auction_player_id || player.id) ? 'opacity-60 cursor-wait' : ''
+                                  }`}
+                                  disabled={removingPlayerIds.has(player.auction_player_id || player.id)}
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     handleRemovePlayer(player.auction_player_id || player.id);
                                   }}
                                 >
-                                  <X className="h-4 w-4" />
+                                  {removingPlayerIds.has(player.auction_player_id || player.id) ? (
+                                    <span className="w-3 h-3 border-2 border-red-600 border-t-transparent rounded-full animate-spin" />
+                                  ) : (
+                                    <X className="h-4 w-4" />
+                                  )}
                                 </Button>
                               </div>
                             ))}
@@ -2250,8 +2384,24 @@ const getSectionedPlayers = useCallback((categoryLabel: string) => {
                     <h3 className="text-lg font-bold mb-4 text-blue-700">
                       Updated Players ({updatedPlayers.length})
                     </h3>
+                     <div className="mb-4">
+                       <Input
+                         type="text"
+                         placeholder="Search by player name (case-insensitive)..."
+                         value={updatedPlayersSearchQuery}
+                         onChange={(e) => setUpdatedPlayersSearchQuery(e.target.value)}
+                         className="w-full"
+                       />
+                     </div>
                     <div className="space-y-3 max-h-80 overflow-y-auto">
-                      {updatedPlayers.map(player => (
+                       {updatedPlayers
+                         .filter((player: any) => 
+                           !updatedPlayersSearchQuery || 
+                           (player.name || player.player_name || '')
+                             .toLowerCase()
+                             .includes(updatedPlayersSearchQuery.toLowerCase())
+                         )
+                         .map(player => (
                         <div
                           key={player.auction_player_id || player.id}
                           className="flex items-center gap-3 p-4 bg-blue-50 rounded-lg border border-blue-200"
@@ -2276,10 +2426,20 @@ const getSectionedPlayers = useCallback((categoryLabel: string) => {
                           <Button
                             variant="outline"
                             size="sm"
-                            className="text-red-600 border-red-300 hover:bg-red-50"
+                            className={`text-red-600 border-red-300 hover:bg-red-50 relative ${
+                              removingPlayerIds.has(player.auction_player_id || player.id) ? 'opacity-60 cursor-wait' : ''
+                            }`}
+                            disabled={removingPlayerIds.has(player.auction_player_id || player.id)}
                             onClick={() => handleRemovePlayer(player.auction_player_id || player.id)}
                           >
-                            Remove
+                            {removingPlayerIds.has(player.auction_player_id || player.id) ? (
+                              <span className="flex items-center gap-2">
+                                <span className="w-3 h-3 border-2 border-red-600 border-t-transparent rounded-full animate-spin" />
+                                Removing...
+                              </span>
+                            ) : (
+                              'Remove'
+                            )}
                           </Button>
                         </div>
                       ))}
@@ -2337,7 +2497,10 @@ const getSectionedPlayers = useCallback((categoryLabel: string) => {
                           <Label>Venue</Label>
                           <Input value={newMatch.venue} onChange={e => setNewMatch(s => ({...s, venue: e.target.value}))} placeholder="e.g. Sher-e-Bangla National Cricket Stadium" />
                         </div>
-                        <Button onClick={handleCreateMatch} className="w-full">Create Match</Button>
+                        <Button onClick={handleCreateMatch} className="w-full relative" disabled={creatingMatch}>
+                          {creatingMatch && <span className="absolute left-4 w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />}
+                          <span className={creatingMatch ? 'pl-6' : ''}>{creatingMatch ? 'Creating...' : 'Create Match'}</span>
+                        </Button>
                       </>
                     )}
                   </div>
@@ -2363,11 +2526,21 @@ const getSectionedPlayers = useCallback((categoryLabel: string) => {
                             <p className="text-sm text-gray-600">{match.date} at {match.venue}</p>
                             <p className="text-xs text-blue-600">Status: {match.status}</p>
                           </div>
-                          <Select value={match.status} onChange={e => updateMatchStatus(match.id, e.target.value)}>
-                            <option value="upcoming">Upcoming</option>
-                            <option value="live">Live</option>
-                            <option value="completed">Completed</option>
-                          </Select>
+                          <div className="relative">
+                            <Select 
+                              value={match.status} 
+                              onChange={e => updateMatchStatus(match.id, e.target.value)}
+                              disabled={updatingMatchId === match.id}
+                              className={updatingMatchId === match.id ? 'opacity-60 cursor-wait' : ''}
+                            >
+                              <option value="upcoming">Upcoming</option>
+                              <option value="live">Live</option>
+                              <option value="completed">Completed</option>
+                            </Select>
+                            {updatingMatchId === match.id && (
+                              <span className="absolute right-3 top-1/2 transform -translate-y-1/2 w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+                            )}
+                          </div>
                         </Card>
                       ))}
                     </div>
