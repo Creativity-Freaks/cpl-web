@@ -17,15 +17,17 @@ export const AdminPlayerImage: React.FC<AdminPlayerImageProps> = ({ player, onCl
 
   // Category Options (Start Position নয়)
   const CATEGORY_OPTIONS: { value: string; label: string }[] = [
-    { value: 'Elite', label: 'Elite' },
-    { value: 'Platinum', label: 'Platinum' },
-    { value: 'Diamond', label: 'Diamond' },
-    { value: 'Gold-I', label: 'Gold-I' },
-    { value: 'Gold-II', label: 'Gold-II' },
-    { value: 'Silver-I', label: 'Silver-I' },
-    { value: 'Silver-II', label: 'Silver-II' },
-    { value: 'Titanium-I', label: 'Titanium-I' },
-    { value: 'Titanium-II', label: 'Titanium-II' },
+   { value: 'A', label: 'Elite' },
+                { value: 'B', label: 'Platinum' },
+                { value: 'C', label: 'Diamond' },
+                { value: 'D', label: 'Gold-1' },
+                { value: 'E', label: 'Gold-2' },
+                { value: 'F', label: 'Silver-1' },
+                { value: 'G', label: 'Silver-2' },
+                { value: 'H', label: 'Bronze-1' },
+                { value: 'I', label: 'Bronze-2' },
+                { value: 'J', label: 'Titanium-1' },
+                { value: 'K', label: 'Titanium-2' },
   ];
 
   const getCategoryLabel = (value: any): string => {
